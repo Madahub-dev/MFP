@@ -26,6 +26,7 @@ from mfp.core.types import (
     DEFAULT_FRAME_DEPTH,
 )
 
+from mfp.observability.logging import LogContext, TimedOperation, get_logger
 from mfp.storage.crypto import decrypt_cell, derive_storage_key, encrypt_cell
 from mfp.storage.schema import (
     SCHEMA_VERSION,
@@ -34,6 +35,8 @@ from mfp.storage.schema import (
     migrate,
     set_pragma,
 )
+
+logger = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +141,20 @@ class StorageEngine:
 
         self._storage_key: StateValue | None = None
         self._runtime_id: bytes = b""
+
+        # Log storage initialization
+        context = LogContext(
+            correlation_id="storage_init",
+            runtime_id="",
+            operation="storage_init",
+        )
+        logger.info(
+            f"Storage initialized",
+            context=context,
+            db_path=db,
+            encrypt_at_rest=config.encrypt_at_rest,
+            wal_mode=config.wal_mode,
+        )
 
     def close(self) -> None:
         """Close database connection."""
@@ -552,12 +569,20 @@ class StorageEngine:
 
         Maps to: I-14 §6.
         """
+        context = LogContext(
+            correlation_id="recovery",
+            runtime_id="",
+            operation="recover",
+        )
+
         meta = self.load_runtime_meta()
         if meta is None:
+            logger.info("No existing state found, fresh start", context=context)
             return None
 
-        # Verify runtime identity
-        expected_id = sha256(meta.deployment_id + meta.instance_id)
+        with TimedOperation("storage_recovery", context):
+            # Verify runtime identity
+            expected_id = sha256(meta.deployment_id + meta.instance_id)
         warnings: list[str] = []
         if meta.runtime_id != expected_id.data:
             warnings.append(
@@ -605,12 +630,12 @@ class StorageEngine:
             except Exception as e:
                 warnings.append(f"Failed to recompute Sg: {e}")
 
-        # Verify against cache
-        cached_sg = self.load_sg_cache()
-        if cached_sg and sg and cached_sg.value.data != sg.value.data:
-            warnings.append("Cached Sg mismatch — using recomputed value")
+            # Verify against cache
+            cached_sg = self.load_sg_cache()
+            if cached_sg and sg and cached_sg.value.data != sg.value.data:
+                warnings.append("Cached Sg mismatch — using recomputed value")
 
-        return RecoveryResult(
+        result = RecoveryResult(
             meta=meta,
             agents=agents,
             channels=channels,
@@ -618,3 +643,18 @@ class StorageEngine:
             sg=sg,
             warnings=warnings,
         )
+
+        logger.info(
+            "Recovery completed",
+            context=context,
+            agent_count=len(agents),
+            channel_count=len(channels),
+            bilateral_count=len(bilateral),
+            warnings_count=len(warnings),
+        )
+
+        if warnings:
+            for warning in warnings:
+                logger.warning(f"Recovery warning: {warning}", context=context)
+
+        return result

@@ -399,6 +399,7 @@ class Runtime:
                 global_state=self._sg,
                 config=self._config,
                 deliver=dest_rec.callable,
+                correlation_id=correlation_id,
             )
         except FrameValidationError:
             # Validation failure: track and potentially quarantine

@@ -19,8 +19,9 @@ from mfp.core.types import (
     EnvelopeHeader,
     ProtocolMessage,
 )
+from mfp.observability.logging import LogContext, get_logger, log_audit_event
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 MessageHandler = Callable[[EnvelopeHeader, ProtocolMessage], Awaitable[None]]
 

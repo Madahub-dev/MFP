@@ -11,9 +11,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from mfp.core.types import AgentState, Channel, ChannelId, ChannelStatus
+from mfp.observability.logging import LogContext, get_logger, log_audit_event
 
 if TYPE_CHECKING:
     from mfp.runtime.runtime import AgentRecord, ChannelRegistry
+
+logger = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -53,6 +56,21 @@ def quarantine_channel(channel: Channel, reason: str = "") -> None:
     """
     channel.status = ChannelStatus.QUARANTINED
 
+    # Log quarantine event
+    context = LogContext(
+        correlation_id="quarantine",
+        runtime_id="",
+        channel_id=channel.channel_id.value.hex()[:8],
+        operation="quarantine_channel",
+    )
+    log_audit_event(
+        "channel_quarantined",
+        context,
+        reason=reason,
+        failure_count=channel.validation_failure_count,
+    )
+    logger.warning(f"Channel quarantined: {reason}", context=context)
+
 
 def quarantine_agent(
     agent: AgentRecord,
@@ -62,6 +80,25 @@ def quarantine_agent(
     """Quarantine an agent and all its active channels.
 
     Returns list of channels that were quarantined.
+
+    Maps to: runtime-interface.md §8.3.
+    """
+    # Log agent quarantine
+    context = LogContext(
+        correlation_id="quarantine",
+        runtime_id="",
+        agent_id=agent.agent_id.value.hex()[:8],
+        operation="quarantine_agent",
+    )
+    log_audit_event(
+        "agent_quarantined",
+        context,
+        reason=reason,
+        message_count=agent.message_count,
+    )
+    logger.warning(f"Agent quarantined: {reason}", context=context)
+
+    """Original docstring continued...
 
     Maps to: runtime-interface.md §8.3.
     """

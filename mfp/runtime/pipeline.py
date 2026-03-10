@@ -34,6 +34,9 @@ from mfp.core.types import (
     Receipt,
     StateValue,
 )
+from mfp.observability.logging import LogContext, TimedOperation, get_logger
+
+logger = get_logger(__name__)
 
 AgentCallable = Callable[[DeliveredMessage], None]
 
@@ -186,6 +189,7 @@ def deliver_stage(
     channel_id: ChannelId,
     message_id: MessageId,
     deliver: AgentCallable,
+    correlation_id: str = "",
 ) -> DeliveredMessage:
     """Deliver decoded message to the destination agent.
 
@@ -196,6 +200,7 @@ def deliver_stage(
         sender=sender,
         channel=channel_id,
         message_id=message_id,
+        correlation_id=correlation_id,
     )
     deliver(msg)
     return msg
@@ -212,6 +217,7 @@ def process_message(
     global_state: GlobalState,
     config: RuntimeConfig,
     deliver: AgentCallable,
+    correlation_id: str = "",
 ) -> PipelineResult:
     """Execute the six-stage message pipeline.
 
@@ -220,32 +226,58 @@ def process_message(
 
     Maps to: runtime-interface.md §4.
     """
+    # Create logging context
+    context = LogContext(
+        correlation_id=correlation_id,
+        runtime_id="",  # Set by caller
+        agent_id=sender.value.hex()[:8],
+        channel_id=channel.channel_id.value.hex()[:8],
+        operation="pipeline",
+    )
+
+    logger.debug("Pipeline started", context=context, step=channel.state.step)
+
     # Stage 1: ACCEPT
-    message_id = accept(sender, channel, payload, config)
+    context.stage = "ACCEPT"
+    with TimedOperation("accept", context):
+        message_id = accept(sender, channel, payload, config)
 
     # Stage 2: FRAME
-    frame = frame_stage(channel, global_state)
+    context.stage = "FRAME"
+    with TimedOperation("frame", context):
+        frame = frame_stage(channel, global_state)
 
     # Stage 3: ENCODE
-    protocol_msg = encode_stage(channel, payload, frame, config)
+    context.stage = "ENCODE"
+    with TimedOperation("encode", context):
+        protocol_msg = encode_stage(channel, payload, frame, config)
 
     # Stage 4: VALIDATE (intra-runtime self-check)
-    validate_stage(protocol_msg, frame)
+    context.stage = "VALIDATE"
+    with TimedOperation("validate", context):
+        validate_stage(protocol_msg, frame)
 
     # Stage 5: DECODE
-    decoded = decode_stage(protocol_msg, channel, config)
+    context.stage = "DECODE"
+    with TimedOperation("decode", context):
+        decoded = decode_stage(protocol_msg, channel, config)
 
     # Stage 6: DELIVER
-    delivered = deliver_stage(decoded, sender, channel.channel_id, message_id, deliver)
+    context.stage = "DELIVER"
+    with TimedOperation("deliver", context):
+        delivered = deliver_stage(decoded, sender, channel.channel_id, message_id, deliver, correlation_id)
 
     # Compute new state (not yet applied)
     new_local = advance(channel.state.local_state, frame)
+
+    logger.debug("Pipeline completed", context=context)
 
     return PipelineResult(
         receipt=Receipt(
             message_id=message_id,
             channel=channel.channel_id,
             step=channel.state.step,
+            correlation_id=correlation_id,
         ),
         delivered=delivered,
         new_local_state=new_local,
