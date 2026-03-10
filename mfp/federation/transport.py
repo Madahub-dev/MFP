@@ -114,9 +114,14 @@ class TransportServer:
             self._config.host,
             self._config.port,
         )
+        context = LogContext(
+            correlation_id="transport_start",
+            runtime_id="",
+            operation="server_start",
+        )
         logger.info(
-            "Transport server listening on %s:%d",
-            self._config.host, self._config.port,
+            f"Transport server listening on {self._config.host}:{self._config.port}",
+            context=context,
         )
 
     async def stop(self) -> None:
@@ -135,7 +140,7 @@ class TransportServer:
     ) -> None:
         """Handle an incoming bilateral connection."""
         peer = writer.get_extra_info("peername", "unknown")
-        logger.info("Accepted connection from %s", peer)
+        logger.info(f"Accepted connection from {peer}")
         task = asyncio.current_task()
         if task:
             self._connections.append(task)
@@ -146,11 +151,11 @@ class TransportServer:
                 )
                 await self._handler(header, msg)
         except asyncio.IncompleteReadError:
-            logger.info("Peer %s disconnected", peer)
+            logger.info(f"Peer {peer} disconnected")
         except asyncio.TimeoutError:
-            logger.warning("Read timeout from %s", peer)
+            logger.warning(f"Read timeout from {peer}")
         except Exception as e:
-            logger.error("Connection error from %s: %s", peer, e)
+            logger.error(f"Connection error from {peer}: {e}")
         finally:
             writer.close()
             try:
@@ -185,7 +190,7 @@ class TransportClient:
             asyncio.open_connection(self._host, self._port),
             timeout=self._config.connect_timeout,
         )
-        logger.info("Connected to %s:%d", self._host, self._port)
+        logger.info(f"Connected to {self._host}:{self._port}")
 
     async def send(
         self,
@@ -267,9 +272,7 @@ class ConnectionPool:
                 await client.connect()
                 return
             except (ConnectionError, asyncio.TimeoutError, OSError) as e:
-                logger.warning(
-                    "Connection attempt %d failed: %s", attempt + 1, e,
-                )
+                logger.warning(f"Connection attempt {attempt + 1} failed: {e}")
                 if attempt < self._config.max_reconnect_attempts - 1:
                     await asyncio.sleep(delay)
                     delay = min(delay * 2, self._config.backoff_max)
