@@ -5,6 +5,40 @@ All notable changes to the Mirror Frame Protocol (MFP) will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+**Security & Hardening**
+- Configuration validator with YAML schema validation (`mfp/config/validator.py`)
+- Input validation module for security-critical operations (`mfp/core/validation.py`)
+- Frame depth bounds enforcement (MIN=2, MAX=32)
+- Step counter overflow detection (warn at 2^60, halt at 2^62)
+- Master key validation (32 bytes, no weak keys)
+- Error message sanitization (redact internal details)
+- Configuration warnings on server startup
+
+### Changed
+
+**BREAKING: Secure Defaults**
+- `RuntimeConfig.validation_failure_threshold`: 3 → 5
+- `RuntimeConfig.max_message_rate`: 0 (unlimited) → 1000 msg/sec
+- `RuntimeConfig.max_payload_size`: 0 (unlimited) → 1 MB
+- `StorageConfig.encrypt_at_rest`: False → True (requires master key)
+
+**Migration Required:**
+Existing deployments must either:
+1. Generate 32-byte master key: `dd if=/dev/urandom of=master.key bs=32 count=1`
+2. Explicitly disable encryption in config: `storage: {encrypt_at_rest: false}`
+
+### Security
+
+- All configuration validated at startup with actionable error messages
+- Insecure configs (unbounded limits, missing keys) now emit warnings
+- Production deployments protected by secure defaults
+
+---
+
 ## [0.1.0] - 2026-03-10
 
 ### Added
