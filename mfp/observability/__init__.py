@@ -9,6 +9,12 @@ from mfp.observability.logging import (
     log_performance,
     set_logging_config,
 )
+from mfp.observability.metrics import (
+    MetricsCollector,
+    MetricsConfig,
+    get_metrics_collector,
+    set_metrics_collector,
+)
 
 __all__ = [
     # Logging
@@ -23,4 +29,9 @@ __all__ = [
     "HealthStatus",
     "HealthHTTPServer",
     "HealthServerConfig",
+    # Metrics
+    "MetricsCollector",
+    "MetricsConfig",
+    "get_metrics_collector",
+    "set_metrics_collector",
 ]

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from mfp.observability.logging import LogContext, get_logger
+from mfp.observability.metrics import MetricsCollector
 
 if TYPE_CHECKING:
     from mfp.observability.health import HealthChecker
@@ -26,21 +27,29 @@ class HealthServerConfig:
     host: str = "127.0.0.1"  # Localhost only by default for security
     port: int = 9877
     allow_detailed_status: bool = True
+    enable_metrics: bool = True  # Enable /metrics endpoint
 
 
 class HealthHTTPServer:
-    """Simple HTTP server for health checks.
+    """Simple HTTP server for health checks and metrics.
 
     Provides endpoints:
     - GET /health/live - Liveness probe
     - GET /health/ready - Readiness probe
     - GET /health/startup - Startup probe
     - GET /health/status - Detailed status (optional)
+    - GET /metrics - Prometheus metrics (optional)
     """
 
-    def __init__(self, config: HealthServerConfig, health_checker: HealthChecker):
+    def __init__(
+        self,
+        config: HealthServerConfig,
+        health_checker: HealthChecker,
+        metrics_collector: MetricsCollector | None = None,
+    ):
         self.config = config
         self.health_checker = health_checker
+        self.metrics_collector = metrics_collector
         self._server = None
         self._running = False
 
@@ -119,6 +128,8 @@ class HealthHTTPServer:
                 await self._handle_startup(writer)
             elif path == "/health/status" and self.config.allow_detailed_status:
                 await self._handle_status(writer)
+            elif path == "/metrics" and self.config.enable_metrics:
+                await self._handle_metrics(writer)
             else:
                 await self._send_response(writer, 404, "Not Found")
 
@@ -154,6 +165,21 @@ class HealthHTTPServer:
         """Handle detailed status request."""
         result = self.health_checker.detailed_status()
         await self._send_json_response(writer, 200, result.to_dict())
+
+    async def _handle_metrics(self, writer: asyncio.StreamWriter):
+        """Handle Prometheus metrics request."""
+        if not self.metrics_collector:
+            await self._send_response(writer, 503, "Metrics Not Available")
+            return
+
+        prometheus_output = self.metrics_collector.export_prometheus()
+        await self._send_response(
+            writer,
+            200,
+            "OK",
+            prometheus_output.encode(),
+            "text/plain; version=0.0.4",
+        )
 
     async def _send_json_response(
         self, writer: asyncio.StreamWriter, status_code: int, data: dict

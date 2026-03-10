@@ -258,17 +258,18 @@ def log_performance(
 
 @dataclass
 class TimedOperation:
-    """Context manager for timing operations with automatic logging.
+    """Context manager for timing operations with automatic logging and metrics.
 
     Usage:
         with TimedOperation("sg_computation", context) as timer:
             result = compute_sg()
-        # Automatically logs duration
+        # Automatically logs duration and records metrics
     """
 
     operation: str
     context: LogContext
     metadata: dict[str, Any] = field(default_factory=dict)
+    record_metrics: bool = field(default=True)
     start_time: float = field(default=0.0, init=False)
     end_time: float = field(default=0.0, init=False)
 
@@ -279,9 +280,28 @@ class TimedOperation:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.end_time = time.perf_counter()
         duration_ms = (self.end_time - self.start_time) * 1000
+        duration_s = duration_ms / 1000.0
 
         if exc_type is None:
             log_performance(self.operation, duration_ms, self.context, **self.metadata)
+
+            # Record metrics if enabled
+            if self.record_metrics:
+                try:
+                    from mfp.observability.metrics import get_metrics_collector
+                    metrics = get_metrics_collector()
+
+                    # Map operation to appropriate metric
+                    if "pipeline" in self.operation or self.context.stage:
+                        stage = self.context.stage or self.operation
+                        metrics.observe_pipeline_duration(stage, duration_s)
+                    elif "sg_computation" in self.operation:
+                        metrics.observe_sg_computation_duration(duration_s)
+                    elif "storage" in self.operation:
+                        metrics.observe_storage_operation_duration(self.operation, duration_s)
+                except Exception:
+                    # Metrics failures should not break the operation
+                    pass
         else:
             # Log error with timing
             logger = get_logger("mfp.performance")

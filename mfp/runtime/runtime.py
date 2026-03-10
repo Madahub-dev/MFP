@@ -44,6 +44,7 @@ from mfp.runtime.pipeline import (
     process_message,
 )
 from mfp.observability.logging import LogContext, get_logger, log_audit_event
+from mfp.observability.metrics import get_metrics_collector
 from mfp.runtime.quarantine import (
     check_rate_limit,
     check_validation_failure,
@@ -305,6 +306,10 @@ class Runtime:
         record = self._lookup_agent(agent_id)
         q_quarantine_agent(record, self._channels, reason)
 
+        # Record metrics
+        metrics = get_metrics_collector()
+        metrics.increment_quarantine_events(reason=reason or "unknown")
+
     def quarantine_channel(self, channel_id: ChannelId, reason: str = "") -> None:
         """Quarantine a single channel.
 
@@ -312,6 +317,10 @@ class Runtime:
         """
         channel = self._lookup_channel(channel_id)
         q_quarantine_channel(channel, reason)
+
+        # Record metrics
+        metrics = get_metrics_collector()
+        metrics.increment_quarantine_events(reason=reason or "unknown")
 
     def restore_agent(self, agent_id: AgentId) -> None:
         """Restore a quarantined agent and its channels.
@@ -401,9 +410,14 @@ class Runtime:
                 deliver=dest_rec.callable,
                 correlation_id=correlation_id,
             )
-        except FrameValidationError:
+        except FrameValidationError as e:
             # Validation failure: track and potentially quarantine
             increment_failure_count(channel)
+
+            # Record metrics
+            metrics = get_metrics_collector()
+            metrics.increment_validation_failures(error_type=type(e).__name__)
+
             if check_validation_failure(
                 channel, self._config.validation_failure_threshold
             ):
@@ -425,6 +439,17 @@ class Runtime:
         )
 
         self._logger.info("Message sent successfully", context=context, step=result.receipt.step)
+
+        # Record metrics
+        metrics = get_metrics_collector()
+        metrics.increment_messages_sent(
+            agent_id=sender.value.hex()[:8],
+            channel_id=channel_id.value.hex()[:8],
+        )
+        metrics.increment_messages_received(
+            agent_id=dest_id.value.hex()[:8],
+        )
+        metrics.observe_message_size(len(payload))
 
         return receipt
 
