@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mfp"
+version = "0.1.0"
+description = "Mirror Frame Protocol — symmetric frame envelope for LLM agent communication"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Akil Abderrahim"},
+]
+keywords = ["llm", "agents", "protocol", "communication", "e2ee"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Networking",
+]
+
+dependencies = [
+    "cryptography>=42.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+]
+
+[project.scripts]
+mfp-server = "mfp.server:main"
+
+[project.urls]
+Homepage = "https://github.com/Madahub-dev/MFP"
+Repository = "https://github.com/Madahub-dev/MFP"
+
+[tool.setuptools]
+packages = ["mfp", "mfp.core", "mfp.runtime", "mfp.agent", "mfp.storage", "mfp.federation"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

@@ -1,0 +1,426 @@
+"""MFP Runtime — the central stateful engine.
+
+Owns all protocol state: agent table, channel registry, global ratchet
+state Sg. Orchestrates the message lifecycle by composing pure core
+functions with the pipeline, channel, and quarantine modules.
+
+Maps to: impl/I-06_runtime.md
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from mfp.agent.identity import generate_agent_id
+from mfp.core.primitives import random_bytes, sha256
+from mfp.core.ratchet import compose_ordered
+from mfp.core.types import (
+    AgentError,
+    AgentErrorCode,
+    AgentId,
+    AgentState,
+    AgentStatus,
+    ChannelId,
+    ChannelInfo,
+    ChannelStatus,
+    FrameValidationError,
+    GlobalState,
+    Receipt,
+    StateValue,
+    DEFAULT_FRAME_DEPTH,
+)
+
+from mfp.runtime.channels import (
+    ChannelRegistry,
+    advance_channel,
+    close_channel as ch_close,
+    establish_channel as ch_establish,
+    get_channel,
+    get_channels_for_agent,
+)
+from mfp.runtime.pipeline import (
+    AgentCallable,
+    RuntimeConfig,
+    process_message,
+)
+from mfp.runtime.quarantine import (
+    check_rate_limit,
+    check_validation_failure,
+    increment_failure_count,
+    quarantine_agent as q_quarantine_agent,
+    quarantine_channel as q_quarantine_channel,
+    reset_failure_count,
+    restore_agent as q_restore_agent,
+    restore_channel as q_restore_channel,
+)
+
+
+# ---------------------------------------------------------------------------
+# Internal Types
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AgentRecord:
+    """Internal agent record. Not exposed to agents.
+
+    Maps to: I-06 §6.1.
+    """
+    agent_id: AgentId
+    state: AgentState
+    callable: AgentCallable
+    channels: set[bytes] = field(default_factory=set)
+    message_count: int = 0
+    quarantine_reason: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Runtime
+# ---------------------------------------------------------------------------
+
+class Runtime:
+    """MFP Runtime — the central stateful engine.
+
+    Owns all protocol state. Orchestrates the message lifecycle.
+    Composes pure core functions into a working engine.
+
+    Maps to: runtime-interface.md §1, §9.
+    """
+
+    def __init__(self, config: RuntimeConfig | None = None) -> None:
+        self._config = config or RuntimeConfig()
+        self._identity = self._derive_identity()
+        self._agents: dict[bytes, AgentRecord] = {}
+        self._channels: ChannelRegistry = {}
+        self._sg: GlobalState | None = None
+        self._agent_counter: int = 0
+
+    # ------------------------------------------------------------------
+    # Identity
+    # ------------------------------------------------------------------
+
+    def _derive_identity(self) -> StateValue:
+        """Derive runtime identity from deployment and instance IDs.
+
+        SHA-256(deployment_id || instance_id). Random values used if
+        config fields are empty (sufficient for single-runtime operation).
+
+        Maps to: I-06 §5.
+        """
+        deployment = self._config.deployment_id or random_bytes(32)
+        instance = self._config.instance_id or random_bytes(32)
+        return sha256(deployment + instance)
+
+    def _generate_agent_id(self) -> AgentId:
+        """Generate a unique agent ID via I-11 identity scheme.
+
+        SHA-256(runtime_identity || counter || random_suffix).
+        """
+        self._agent_counter += 1
+        return generate_agent_id(self._identity, self._agent_counter)
+
+    # ------------------------------------------------------------------
+    # Global State
+    # ------------------------------------------------------------------
+
+    def _recompute_sg(self) -> None:
+        """Recompute Sg from all active and quarantined channel states.
+
+        Quarantined channels contribute (frozen state included).
+        Closed channels do not (removed from registry).
+
+        Maps to: spec.md §4.3, runtime-interface.md §8.3.
+        """
+        if not self._channels:
+            self._sg = None
+            return
+
+        self._sg = compose_ordered(
+            channel_states=[
+                (ch.channel_id, ch.state.local_state)
+                for ch in self._channels.values()
+            ],
+        )
+
+    # ------------------------------------------------------------------
+    # Internal Lookups
+    # ------------------------------------------------------------------
+
+    def _lookup_agent(self, agent_id: AgentId) -> AgentRecord:
+        """Look up an agent by ID. Raises AgentError if not found."""
+        record = self._agents.get(agent_id.value)
+        if record is None:
+            raise AgentError(AgentErrorCode.UNBOUND, "Agent not bound")
+        return record
+
+    def _lookup_channel(self, channel_id: ChannelId) -> "Channel":
+        """Look up a channel by ID. Raises AgentError if not found."""
+        channel = get_channel(self._channels, channel_id)
+        if channel is None:
+            raise AgentError(AgentErrorCode.INVALID_CHANNEL, "Channel not found")
+        return channel
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
+
+    @property
+    def identity(self) -> StateValue:
+        """Runtime identity (immutable after init)."""
+        return self._identity
+
+    @property
+    def global_state(self) -> GlobalState | None:
+        """Current Sg. None if no channels exist."""
+        return self._sg
+
+    # ------------------------------------------------------------------
+    # Layer 2: Administration
+    # ------------------------------------------------------------------
+
+    def bind_agent(self, agent_callable: AgentCallable) -> AgentId:
+        """Bind a new agent to the runtime.
+
+        Creates an AgentRecord in BOUND state. The agent becomes ACTIVE
+        when its first channel is established.
+
+        Maps to: I-06 §7.1.
+        """
+        agent_id = self._generate_agent_id()
+        record = AgentRecord(
+            agent_id=agent_id,
+            state=AgentState.BOUND,
+            callable=agent_callable,
+        )
+        self._agents[agent_id.value] = record
+        return agent_id
+
+    def unbind_agent(self, agent_id: AgentId) -> None:
+        """Unbind an agent from the runtime.
+
+        Closes all channels, sets state to TERMINATED, removes from registry.
+
+        Maps to: I-06 §7.2.
+        """
+        record = self._lookup_agent(agent_id)
+
+        # Close all channels the agent participates in
+        for ch_id_bytes in list(record.channels):
+            self.close_channel(ChannelId(ch_id_bytes))
+
+        record.state = AgentState.TERMINATED
+        del self._agents[agent_id.value]
+
+    def establish_channel(
+        self,
+        agent_a: AgentId,
+        agent_b: AgentId,
+        depth: int = DEFAULT_FRAME_DEPTH,
+    ) -> ChannelId:
+        """Establish a channel between two bound agents.
+
+        Derives Sl0, registers channel, adds to agents' channel sets,
+        transitions BOUND agents to ACTIVE, recomputes Sg.
+
+        Maps to: I-06 §8.1.
+        """
+        rec_a = self._lookup_agent(agent_a)
+        rec_b = self._lookup_agent(agent_b)
+
+        if rec_a.state == AgentState.QUARANTINED:
+            raise AgentError(AgentErrorCode.QUARANTINED, "Agent A is quarantined")
+        if rec_b.state == AgentState.QUARANTINED:
+            raise AgentError(AgentErrorCode.QUARANTINED, "Agent B is quarantined")
+
+        channel = ch_establish(
+            registry=self._channels,
+            runtime_identity=self._identity,
+            agent_a=agent_a,
+            agent_b=agent_b,
+            depth=depth,
+        )
+
+        # Register channel with both agents
+        rec_a.channels.add(channel.channel_id.value)
+        rec_b.channels.add(channel.channel_id.value)
+
+        # Transition BOUND → ACTIVE
+        if rec_a.state == AgentState.BOUND:
+            rec_a.state = AgentState.ACTIVE
+        if rec_b.state == AgentState.BOUND:
+            rec_b.state = AgentState.ACTIVE
+
+        self._recompute_sg()
+        return channel.channel_id
+
+    def close_channel(self, channel_id: ChannelId) -> None:
+        """Close a channel and zero its state.
+
+        Removes from agents' channel sets, zeros Sl, recomputes Sg.
+
+        Maps to: I-06 §8.2.
+        """
+        channel = self._lookup_channel(channel_id)
+
+        # Remove from agents' channel sets
+        rec_a = self._agents.get(channel.agent_a.value)
+        if rec_a:
+            rec_a.channels.discard(channel_id.value)
+        rec_b = self._agents.get(channel.agent_b.value)
+        if rec_b:
+            rec_b.channels.discard(channel_id.value)
+
+        ch_close(self._channels, channel_id)
+        self._recompute_sg()
+
+        # Deactivate agents that have no remaining channels (ACTIVE → BOUND)
+        for rec in (rec_a, rec_b):
+            if rec and rec.state == AgentState.ACTIVE and not rec.channels:
+                rec.state = AgentState.BOUND
+
+    def quarantine_agent(self, agent_id: AgentId, reason: str = "") -> None:
+        """Quarantine an agent and all its active channels.
+
+        Maps to: runtime-interface.md §8.3.
+        """
+        record = self._lookup_agent(agent_id)
+        q_quarantine_agent(record, self._channels, reason)
+
+    def quarantine_channel(self, channel_id: ChannelId, reason: str = "") -> None:
+        """Quarantine a single channel.
+
+        Maps to: runtime-interface.md §8.3.
+        """
+        channel = self._lookup_channel(channel_id)
+        q_quarantine_channel(channel, reason)
+
+    def restore_agent(self, agent_id: AgentId) -> None:
+        """Restore a quarantined agent and its channels.
+
+        Maps to: runtime-interface.md §8.4.
+        """
+        record = self._lookup_agent(agent_id)
+        q_restore_agent(record, self._channels)
+
+    def restore_channel(self, channel_id: ChannelId) -> None:
+        """Restore a quarantined channel.
+
+        Maps to: runtime-interface.md §8.4.
+        """
+        channel = self._lookup_channel(channel_id)
+        q_restore_channel(channel)
+
+    # ------------------------------------------------------------------
+    # Layer 1: Agent-Facing
+    # ------------------------------------------------------------------
+
+    def send(
+        self,
+        sender: AgentId,
+        channel_id: ChannelId,
+        payload: bytes,
+    ) -> Receipt:
+        """Process a message through the six-stage pipeline.
+
+        On success: advance ratchet, recompute Sg, return receipt.
+        On validation failure: increment failure count, auto-quarantine
+        if threshold reached, re-raise.
+        On any failure: no state change (atomic).
+
+        Maps to: runtime-interface.md §4.
+        """
+        sender_rec = self._lookup_agent(sender)
+
+        # Verify sender state
+        if sender_rec.state == AgentState.QUARANTINED:
+            raise AgentError(AgentErrorCode.QUARANTINED, "Sender is quarantined")
+        if sender_rec.state != AgentState.ACTIVE:
+            raise AgentError(AgentErrorCode.UNBOUND, "Sender is not active")
+
+        # Rate limit check
+        if check_rate_limit(sender_rec.message_count, self._config.max_message_rate):
+            self.quarantine_agent(sender, "Rate limit exceeded")
+            raise AgentError(AgentErrorCode.QUARANTINED, "Rate limit exceeded")
+
+        channel = self._lookup_channel(channel_id)
+
+        # Determine destination agent
+        if sender.value == channel.agent_a.value:
+            dest_id = channel.agent_b
+        elif sender.value == channel.agent_b.value:
+            dest_id = channel.agent_a
+        else:
+            raise AgentError(AgentErrorCode.INVALID_CHANNEL, "Sender not on channel")
+
+        dest_rec = self._lookup_agent(dest_id)
+
+        # Global state must exist (channels exist)
+        if self._sg is None:
+            raise AgentError(AgentErrorCode.INVALID_CHANNEL, "No global state")
+
+        try:
+            result = process_message(
+                sender=sender,
+                channel=channel,
+                payload=payload,
+                global_state=self._sg,
+                config=self._config,
+                deliver=dest_rec.callable,
+            )
+        except FrameValidationError:
+            # Validation failure: track and potentially quarantine
+            increment_failure_count(channel)
+            if check_validation_failure(
+                channel, self._config.validation_failure_threshold
+            ):
+                q_quarantine_channel(channel)
+            raise
+
+        # Success: advance state
+        advance_channel(channel, result.new_local_state)
+        reset_failure_count(channel)
+        sender_rec.message_count += 1
+        self._recompute_sg()
+
+        return result.receipt
+
+    def get_channels(self, agent_id: AgentId) -> list[ChannelInfo]:
+        """Return agent-visible channel information.
+
+        Maps to: runtime-interface.md §3.2.
+        """
+        self._lookup_agent(agent_id)  # verify bound
+        return get_channels_for_agent(self._channels, agent_id)
+
+    def get_status(self, agent_id: AgentId) -> AgentStatus:
+        """Return agent-visible status.
+
+        Maps to: runtime-interface.md §3.3.
+        """
+        record = self._lookup_agent(agent_id)
+        return AgentStatus(
+            agent_id=agent_id,
+            state=record.state,
+            channel_count=len(record.channels),
+        )
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def shutdown(self) -> None:
+        """Graceful shutdown. Close all channels, terminate agents, zero state.
+
+        Maps to: I-06 §11.
+        """
+        # Close all channels (zeros Sl for each)
+        for ch_id_bytes in list(self._channels.keys()):
+            ch_close(self._channels, ChannelId(ch_id_bytes))
+
+        # Terminate all agents
+        for record in self._agents.values():
+            record.state = AgentState.TERMINATED
+
+        self._agents.clear()
+        self._channels.clear()
+        self._sg = None
+        self._agent_counter = 0
