@@ -430,6 +430,7 @@ class AgentErrorCode(Enum):
     CHANNEL_CLOSED = "channel_closed"
     CHANNEL_QUARANTINED = "channel_quarantined"
     PAYLOAD_TOO_LARGE = "payload_too_large"
+    RESOURCE_LIMIT_EXCEEDED = "resource_limit_exceeded"
 
 
 class AgentError(MFPError):

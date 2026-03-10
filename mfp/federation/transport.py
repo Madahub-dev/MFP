@@ -43,6 +43,9 @@ class TransportConfig:
     backoff_max: float = 30.0       # 30s
     max_reconnect_attempts: int = 10
     max_read_buffer: int = 1_048_576  # 1 MB
+    # Resource Limits (P1.4)
+    max_connections: int = 1000
+    max_connection_rate: int = 100  # connections per second
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +143,20 @@ class TransportServer:
     ) -> None:
         """Handle an incoming bilateral connection."""
         peer = writer.get_extra_info("peername", "unknown")
+
+        # Check max_connections limit
+        if len(self._connections) >= self._config.max_connections:
+            logger.warning(
+                f"Connection limit reached ({self._config.max_connections}), "
+                f"rejecting connection from {peer}"
+            )
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            return
+
         logger.info(f"Accepted connection from {peer}")
         task = asyncio.current_task()
         if task:

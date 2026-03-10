@@ -55,6 +55,11 @@ class RuntimeConfig:
     max_payload_size: int = 1_048_576  # 1 MB
     # Encoding
     encoding_algorithm: bytes = b"aes-256-gcm"
+    # Resource Limits (P1.4)
+    max_channels_per_agent: int = 100
+    max_agents: int = 10_000
+    max_bilateral_channels: int = 100
+    max_storage_size_mb: int = 1024  # 1 GB
 
 
 @dataclass(frozen=True)

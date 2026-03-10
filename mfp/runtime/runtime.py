@@ -196,6 +196,13 @@ class Runtime:
 
         Maps to: I-06 §7.1.
         """
+        # Check max_agents limit
+        if len(self._agents) >= self._config.max_agents:
+            raise AgentError(
+                AgentErrorCode.RESOURCE_LIMIT_EXCEEDED,
+                f"Maximum agent limit reached ({self._config.max_agents})"
+            )
+
         agent_id = self._generate_agent_id()
         record = AgentRecord(
             agent_id=agent_id,
@@ -251,6 +258,18 @@ class Runtime:
             raise AgentError(AgentErrorCode.QUARANTINED, "Agent A is quarantined")
         if rec_b.state == AgentState.QUARANTINED:
             raise AgentError(AgentErrorCode.QUARANTINED, "Agent B is quarantined")
+
+        # Check max_channels_per_agent limit
+        if len(rec_a.channels) >= self._config.max_channels_per_agent:
+            raise AgentError(
+                AgentErrorCode.RESOURCE_LIMIT_EXCEEDED,
+                f"Agent A channel limit reached ({self._config.max_channels_per_agent})"
+            )
+        if len(rec_b.channels) >= self._config.max_channels_per_agent:
+            raise AgentError(
+                AgentErrorCode.RESOURCE_LIMIT_EXCEEDED,
+                f"Agent B channel limit reached ({self._config.max_channels_per_agent})"
+            )
 
         channel = ch_establish(
             registry=self._channels,
