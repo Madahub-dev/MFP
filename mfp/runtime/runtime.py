@@ -43,6 +43,7 @@ from mfp.runtime.pipeline import (
     RuntimeConfig,
     process_message,
 )
+from mfp.observability.logging import LogContext, get_logger, log_audit_event
 from mfp.runtime.quarantine import (
     check_rate_limit,
     check_validation_failure,
@@ -93,6 +94,15 @@ class Runtime:
         self._channels: ChannelRegistry = {}
         self._sg: GlobalState | None = None
         self._agent_counter: int = 0
+        self._logger = get_logger(__name__)
+
+        # Log runtime initialization
+        context = LogContext(
+            correlation_id="init",
+            runtime_id=self._identity.data.hex()[:8],
+            operation="runtime_init",
+        )
+        self._logger.info("Runtime initialized", context=context)
 
     # ------------------------------------------------------------------
     # Identity
@@ -192,6 +202,16 @@ class Runtime:
             callable=agent_callable,
         )
         self._agents[agent_id.value] = record
+
+        # Log agent binding
+        context = LogContext(
+            correlation_id=f"bind-{agent_id.value.hex()[:8]}",
+            runtime_id=self._identity.data.hex()[:8],
+            agent_id=agent_id.value.hex()[:8],
+            operation="bind_agent",
+        )
+        log_audit_event("agent_bound", context, agent_count=len(self._agents))
+
         return agent_id
 
     def unbind_agent(self, agent_id: AgentId) -> None:
@@ -328,6 +348,20 @@ class Runtime:
 
         Maps to: runtime-interface.md §4.
         """
+        # Generate correlation ID for this send operation
+        from mfp.core.primitives import random_bytes
+        correlation_id = random_bytes(16).hex()[:16]
+
+        context = LogContext(
+            correlation_id=correlation_id,
+            runtime_id=self._identity.data.hex()[:8],
+            agent_id=sender.value.hex()[:8],
+            channel_id=channel_id.value.hex()[:8],
+            operation="send",
+        )
+
+        self._logger.debug("Message send initiated", context=context, payload_size=len(payload))
+
         sender_rec = self._lookup_agent(sender)
 
         # Verify sender state
@@ -381,7 +415,17 @@ class Runtime:
         sender_rec.message_count += 1
         self._recompute_sg()
 
-        return result.receipt
+        # Add correlation_id to receipt
+        receipt = Receipt(
+            message_id=result.receipt.message_id,
+            channel=result.receipt.channel,
+            step=result.receipt.step,
+            correlation_id=correlation_id,
+        )
+
+        self._logger.info("Message sent successfully", context=context, step=result.receipt.step)
+
+        return receipt
 
     def get_channels(self, agent_id: AgentId) -> list[ChannelInfo]:
         """Return agent-visible channel information.

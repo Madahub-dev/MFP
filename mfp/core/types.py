@@ -9,7 +9,7 @@ Maps to: impl/I-01_types.md
 from __future__ import annotations
 
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, IntFlag
 
 
@@ -284,6 +284,7 @@ class Receipt:
     message_id: MessageId
     channel: ChannelId
     step: int
+    correlation_id: str = field(default="")  # Trace ID for observability
 
 
 @dataclass(frozen=True)
@@ -292,6 +293,8 @@ class DeliveredMessage:
     payload: bytes
     sender: AgentId
     channel: ChannelId
+    message_id: MessageId
+    correlation_id: str = field(default="")  # Trace ID for observability
     message_id: MessageId
 
 
