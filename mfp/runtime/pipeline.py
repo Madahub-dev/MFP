@@ -46,10 +46,10 @@ class RuntimeConfig:
     instance_id: bytes = b""
     # Frame
     default_frame_depth: int = 4
-    # Quarantine
-    validation_failure_threshold: int = 3
-    max_message_rate: int = 0
-    max_payload_size: int = 0
+    # Quarantine (secure defaults for production)
+    validation_failure_threshold: int = 5
+    max_message_rate: int = 1000  # messages per second
+    max_payload_size: int = 1_048_576  # 1 MB
     # Encoding
     encoding_algorithm: bytes = b"aes-256-gcm"
 

@@ -97,9 +97,9 @@ class TestRuntimeConfig:
         assert cfg.deployment_id == b""
         assert cfg.instance_id == b""
         assert cfg.default_frame_depth == 4
-        assert cfg.validation_failure_threshold == 3
-        assert cfg.max_message_rate == 0
-        assert cfg.max_payload_size == 0
+        assert cfg.validation_failure_threshold == 5  # Updated secure default
+        assert cfg.max_message_rate == 1000  # Secure default
+        assert cfg.max_payload_size == 1_048_576  # Secure default (1MB)
         assert cfg.encoding_algorithm == b"aes-256-gcm"
 
     def test_custom_values(self):

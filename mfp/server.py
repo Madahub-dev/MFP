@@ -21,6 +21,8 @@ from pathlib import Path
 
 import yaml
 
+from mfp.config.validator import ConfigValidator
+
 from mfp.core.primitives import sha256
 from mfp.core.types import (
     AgentId,
@@ -178,6 +180,12 @@ class ServerConfig:
         with open(path) as f:
             raw = yaml.safe_load(f) or {}
         return cls.from_dict(raw)
+
+
+def _load_yaml(path: str) -> dict:
+    """Load YAML configuration file."""
+    with open(path) as f:
+        return yaml.safe_load(f) or {}
 
 
 def _load_master_key(path: str) -> bytes:
@@ -468,16 +476,42 @@ def main(argv: list[str] | None = None) -> None:
     """Main entry point for `python -m mfp.server`."""
     args = parse_args(argv)
 
+    # Load configuration
     if args.config:
-        config = ServerConfig.from_yaml(args.config)
+        raw_config = _load_yaml(args.config)
+
+        # Validate configuration
+        validator = ConfigValidator(strict=False)
+        warnings = validator.validate(raw_config)
+
+        # Parse after validation
+        config = ServerConfig.from_dict(raw_config)
     else:
         config = ServerConfig()
+        warnings = []
 
+    # Setup logging
     log_level = args.log_level or config.log_level
     logging.basicConfig(
         level=getattr(logging, log_level, logging.INFO),
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
+
+    # Print configuration warnings
+    if warnings:
+        logger.warning("Configuration validation warnings:")
+        for w in warnings:
+            level_str = w.severity.upper()
+            logger.log(
+                logging.ERROR if w.severity == "error" else logging.WARNING,
+                f"  [{level_str}] {w.field}: {w.message}",
+            )
+
+        # Exit if critical errors found
+        errors = [w for w in warnings if w.severity == "error"]
+        if errors:
+            logger.error("Critical configuration errors found, exiting")
+            sys.exit(1)
 
     logger.info("MFP Server starting")
     asyncio.run(_run_server(config))

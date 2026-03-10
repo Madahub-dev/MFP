@@ -106,7 +106,7 @@ class TestStorageConfig:
     def test_defaults(self):
         cfg = StorageConfig()
         assert cfg.db_path == ""
-        assert cfg.encrypt_at_rest is False
+        assert cfg.encrypt_at_rest is True  # Updated secure default
         assert cfg.master_key == b""
         assert cfg.wal_mode is True
 

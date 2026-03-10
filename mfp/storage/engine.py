@@ -42,9 +42,13 @@ from mfp.storage.schema import (
 
 @dataclass(frozen=True)
 class StorageConfig:
-    """Storage layer configuration."""
+    """Storage layer configuration.
+
+    Security note: For production deployments with persistent storage,
+    enable encrypt_at_rest and provide a secure 32-byte master_key.
+    """
     db_path: str = ""              # Empty = in-memory (":memory:")
-    encrypt_at_rest: bool = False
+    encrypt_at_rest: bool = True   # PRODUCTION DEFAULT: encryption enabled
     master_key: bytes = b""        # Required if encrypt_at_rest is True
     wal_mode: bool = True
 
