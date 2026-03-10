@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from mfp.agent.identity import generate_agent_id
+from mfp.core.merkle import IncrementalSg
 from mfp.core.primitives import random_bytes, sha256
 from mfp.core.ratchet import compose_ordered
 from mfp.core.types import (
@@ -94,6 +95,7 @@ class Runtime:
         self._agents: dict[bytes, AgentRecord] = {}
         self._channels: ChannelRegistry = {}
         self._sg: GlobalState | None = None
+        self._incremental_sg: IncrementalSg | None = None  # Merkle tree for O(log N) Sg
         self._agent_counter: int = 0
         self._logger = get_logger(__name__)
 
@@ -134,7 +136,11 @@ class Runtime:
     # ------------------------------------------------------------------
 
     def _recompute_sg(self) -> None:
-        """Recompute Sg from all active and quarantined channel states.
+        """Update Sg using incremental Merkle tree (O(1) - already updated).
+
+        The Merkle tree is updated incrementally in establish_channel,
+        close_channel, and after channel state advances. This method
+        just syncs _sg with the tree root.
 
         Quarantined channels contribute (frozen state included).
         Closed channels do not (removed from registry).
@@ -143,14 +149,17 @@ class Runtime:
         """
         if not self._channels:
             self._sg = None
+            self._incremental_sg = None
             return
 
-        self._sg = compose_ordered(
-            channel_states=[
-                (ch.channel_id, ch.state.local_state)
-                for ch in self._channels.values()
-            ],
-        )
+        # Sg is already up-to-date in the Merkle tree
+        if self._incremental_sg:
+            self._sg = self._incremental_sg.get_root_hash()
+
+    def _update_channel_in_tree(self, channel_id: ChannelId, new_state: StateValue) -> None:
+        """Update a single channel state in the Merkle tree (O(log N))."""
+        if self._incremental_sg:
+            self._incremental_sg.update_channel(channel_id, new_state)
 
     # ------------------------------------------------------------------
     # Internal Lookups
@@ -289,7 +298,19 @@ class Runtime:
         if rec_b.state == AgentState.BOUND:
             rec_b.state = AgentState.ACTIVE
 
-        self._recompute_sg()
+        # Add channel to Merkle tree or rebuild if first channel
+        if self._incremental_sg is None:
+            # First channel - build initial tree
+            channel_states = [
+                (ch.channel_id, ch.state.local_state)
+                for ch in self._channels.values()
+            ]
+            self._incremental_sg = IncrementalSg.from_channel_states(channel_states)
+        else:
+            # Add new channel to existing tree
+            self._incremental_sg.add_channel(channel.channel_id, channel.state.local_state)
+
+        self._recompute_sg()  # Sync _sg with tree root
         return channel.channel_id
 
     def close_channel(self, channel_id: ChannelId) -> None:
@@ -309,8 +330,12 @@ class Runtime:
         if rec_b:
             rec_b.channels.discard(channel_id.value)
 
+        # Remove from Merkle tree before closing
+        if self._incremental_sg:
+            self._incremental_sg.remove_channel(channel_id)
+
         ch_close(self._channels, channel_id)
-        self._recompute_sg()
+        self._recompute_sg()  # Sync _sg with tree root
 
         # Deactivate agents that have no remaining channels (ACTIVE → BOUND)
         for rec in (rec_a, rec_b):
@@ -447,7 +472,10 @@ class Runtime:
         advance_channel(channel, result.new_local_state)
         reset_failure_count(channel)
         sender_rec.message_count += 1
-        self._recompute_sg()
+
+        # Update Merkle tree incrementally (O(log N) instead of O(N))
+        self._update_channel_in_tree(channel_id, result.new_local_state)
+        self._recompute_sg()  # Sync _sg with tree root
 
         # Add correlation_id to receipt
         receipt = Receipt(

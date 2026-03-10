@@ -12,6 +12,7 @@ import sqlite3
 import time
 from dataclasses import dataclass
 
+from mfp.core.merkle import compose_ordered_incremental
 from mfp.core.primitives import sha256
 from mfp.core.ratchet import compose_ordered
 from mfp.core.types import (
@@ -617,11 +618,11 @@ class StorageEngine:
         # Load bilateral channels
         bilateral = self.load_bilateral_channels()
 
-        # Recompute Sg
+        # Recompute Sg using Merkle tree (same method as Runtime)
         sg: GlobalState | None = None
         if channels:
             try:
-                sg = compose_ordered(
+                sg = compose_ordered_incremental(
                     channel_states=[
                         (ChannelId(ch.channel_id), StateValue(ch.local_state))
                         for ch in channels
