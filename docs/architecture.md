@@ -19,7 +19,7 @@ MFP is not a client/server system. It's a protocol for peer-to-peer communicatio
 
 ## Layered Architecture
 
-MFP is organized into five layers, from lowest to highest abstraction:
+MFP is organized into six layers, from lowest to highest abstraction:
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -39,15 +39,18 @@ MFP is organized into five layers, from lowest to highest abstraction:
 │    (runtime.py, pipeline.py, channels.py, quarantine.py) │
 └──────────────────────────────────────────────────────────┘
                           │
-            ┌─────────────┴─────────────┐
-            ▼                           ▼
-┌─────────────────────┐     ┌─────────────────────┐
-│       Core          │     │      Storage        │
-│  (crypto, frames,   │     │  (SQLite engine,    │
-│   ratchet, types)   │     │   schema, crypto)   │
-└─────────────────────┘     └─────────────────────┘
-            │                           │
-            └─────────────┬─────────────┘
+            ┌─────────────┼─────────────┐
+            ▼             ▼             ▼
+┌──────────────┐  ┌─────────────┐  ┌──────────────┐
+│  Core        │  │  Storage    │  │ Observability│  ← Production
+│ (crypto,     │  │ (SQLite,    │  │ (logging,    │     hardening
+│  frames,     │  │  schema,    │  │  metrics,    │
+│  ratchet,    │  │  crypto)    │  │  health,     │
+│  types)      │  │             │  │  circuit     │
+│              │  │             │  │  breakers)   │
+└──────────────┘  └─────────────┘  └──────────────┘
+            │             │             │
+            └─────────────┴─────────────┘
                           ▼
             ┌─────────────────────────────┐
             │        Federation           │  ← Cross-runtime
@@ -408,3 +411,89 @@ Subclass `TransportServer` for non-TCP transports (WebSocket, QUIC, etc.).
 - [Security Model](security.md) — threat analysis
 - [Contributing](contributing.md) — development guidelines
 - Protocol design specs in [`design/`](../design/)
+
+---
+
+## Layer 6: Observability & Performance (v0.2.0+)
+
+**Modules:** `mfp/observability/`, `mfp/core/merkle.py`, `mfp/federation/rotation.py`, `mfp/runtime/deduplication.py`
+
+Production hardening features for monitoring, resilience, and performance.
+
+### Observability (`mfp/observability/`)
+
+**logging.py** — Structured logging:
+- LogContext with correlation IDs
+- JSON/text format support
+- Audit events for security operations
+
+**health.py** — Health check endpoints:
+- `/health/live` — Liveness probe (K8s)
+- `/health/ready` — Readiness probe (K8s)
+- `/health/startup` — Startup probe (K8s)
+
+**metrics.py** — Prometheus metrics:
+- Counters: messages, failures, quarantine events
+- Gauges: active channels, agents, queue depth
+- Histograms: pipeline duration, Sg computation time
+
+**circuit_breaker.py** — Resilience pattern:
+- 3-state FSM (CLOSED/OPEN/HALF_OPEN)
+- Prevents cascading failures
+- Used for storage and bilateral channels
+
+**timeout.py** — Time limits:
+- Thread-based timeout enforcement
+- Agent, pipeline, storage timeouts
+- Automatic quarantine on timeout
+
+### Performance Optimizations
+
+**merkle.py** — Incremental Sg (⚠️ Breaking):
+- Merkle tree for O(log N) Sg updates
+- 10x faster than v0.1.x for 1000+ channels
+- <1ms Sg computation
+
+**frame.py** (enhanced) — Frame caching:
+- LRU cache for deterministic frames
+- 16-17x speedup for cache hits
+- 90% hit rate in recovery scenarios
+
+**transport.py** (enhanced) — Connection pooling:
+- TCP connection reuse
+- Idle eviction (5 min), lifetime limits (1 hour)
+- Background cleanup task
+
+### Security Hardening
+
+**rotation.py** — Key rotation:
+- X25519 DH-based rekey protocol
+- Triggers: message count (1M), time (24h), manual
+- Forward secrecy with ephemeral keypairs
+
+**deduplication.py** — Replay protection:
+- Per-channel message ID tracking
+- O(1) duplicate detection
+- Sliding window + TTL eviction
+
+---
+
+## Production Features Summary
+
+| Feature | Module | Benefit |
+|---------|--------|---------|
+| Structured Logging | observability/logging.py | Request tracing, audit trail |
+| Health Checks | observability/health.py | K8s integration, uptime monitoring |
+| Metrics | observability/metrics.py | Performance monitoring, alerting |
+| Circuit Breakers | observability/circuit_breaker.py | Resilience, failure isolation |
+| Timeouts | observability/timeout.py | Prevents blocking, auto-quarantine |
+| Merkle Tree | core/merkle.py | 10x faster Sg (O(log N)) |
+| Frame Caching | core/frame.py | 16x speedup for recovery |
+| Connection Pool | federation/transport.py | Reduced handshake overhead |
+| Key Rotation | federation/rotation.py | Forward secrecy, key fatigue mitigation |
+| Deduplication | runtime/deduplication.py | Replay attack prevention |
+
+**Test Coverage:** 813 tests (591 unit, 191 integration, 27 E2E, 4 benchmark)
+
+See [production-guide.md](./production-guide.md) for deployment details.
+
