@@ -25,6 +25,7 @@ from mfp.core.types import (
     RuntimeId,
     StateValue,
 )
+from mfp.federation.rotation import RotationConfig, RotationSession, RotationTrigger
 from mfp.observability.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 
 
@@ -169,6 +170,11 @@ class BilateralChannel:
     - Tracks failures per bilateral channel
     - Opens after N consecutive failures
     - Prevents cascading failures from problematic peers
+
+    Key rotation (P3.3):
+    - Tracks message count and time since last rotation
+    - Supports automatic rotation based on thresholds
+    - X25519 DH-based rekey protocol
     """
     bilateral_id: bytes
     local_runtime: RuntimeId
@@ -180,6 +186,9 @@ class BilateralChannel:
         default_factory=list,
     )
     _circuit_breaker: CircuitBreaker | None = field(default=None, init=False)
+    _rotation_trigger: RotationTrigger = field(default_factory=RotationTrigger)
+    _rotation_session: RotationSession = field(default_factory=RotationSession)
+    _rotation_config: RotationConfig = field(default_factory=RotationConfig)
 
     def get_circuit_breaker(self, config: CircuitBreakerConfig | None = None) -> CircuitBreaker:
         """Get or create circuit breaker for this bilateral channel."""
@@ -187,6 +196,33 @@ class BilateralChannel:
             name = f"bilateral_{self.bilateral_id.hex()[:8]}"
             self._circuit_breaker = CircuitBreaker(name, config)
         return self._circuit_breaker
+
+    def configure_rotation(self, config: RotationConfig) -> None:
+        """Configure key rotation parameters."""
+        self._rotation_config = config
+
+    def should_rotate(self) -> bool:
+        """Check if key rotation should be triggered.
+
+        Returns True if rotation is needed based on configured thresholds.
+        """
+        reason = self._rotation_trigger.should_rotate(self._rotation_config)
+        if reason:
+            self._rotation_session.reason = reason
+            return True
+        return False
+
+    def increment_message_count(self) -> None:
+        """Increment message counter (call after each bilateral exchange)."""
+        self._rotation_trigger.increment_message_count()
+
+    def get_rotation_trigger(self) -> RotationTrigger:
+        """Get rotation trigger for inspection/testing."""
+        return self._rotation_trigger
+
+    def get_rotation_session(self) -> RotationSession:
+        """Get active rotation session for protocol handling."""
+        return self._rotation_session
 
 
 def derive_bilateral_id(

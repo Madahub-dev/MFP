@@ -816,9 +816,9 @@ frame_cache: LRUCache[FrameCacheKey, Frame] = LRUCache(maxsize=1000)
 
 ### 3. Key Rotation Mechanism
 
-**Status:** Not Started
+**Status:** ✅ Complete
 **Priority:** Medium
-**Estimate:** 3 days
+**Completed:** 2026-03-11
 
 #### Motivation
 
@@ -849,6 +849,57 @@ Alice & Bob: Switch to new_key at step N+1
 **Testing:**
 - Unit tests: Rekey protocol
 - Integration tests: Seamless transition
+
+**Implementation Summary:**
+- ✅ Created `mfp/federation/rotation.py` with full rotation protocol
+- ✅ Rotation triggers: message count, time-based, manual
+- ✅ RotationConfig for configurable thresholds:
+  - `rotation_message_threshold: int = 1_000_000` (1M messages)
+  - `rotation_time_threshold_seconds: float = 86400.0` (24 hours)
+  - `enable_auto_rotation: bool = True`
+  - `manual_rotation_enabled: bool = True`
+- ✅ X25519 DH-based rekey protocol:
+  - `RekeyRequest` message with ephemeral public key
+  - `RekeyAccept` message with ephemeral public key
+  - `derive_rotated_bilateral_state()` combines old state + new DH secret
+- ✅ Integrated with BilateralChannel:
+  - `increment_message_count()` tracks usage
+  - `should_rotate()` checks triggers
+  - `configure_rotation()` sets config
+  - Independent rotation tracking per bilateral channel
+- ✅ RotationSession state machine:
+  - States: IDLE → INITIATING/RESPONDING → ROTATING → COMPLETE
+  - Ephemeral keypair generation
+  - DH shared secret computation
+  - Session reset for retry on failure
+- ✅ Unit tests (25 tests):
+  - `tests/unit/test_rotation.py` (17 tests) - rotation primitives
+  - `tests/unit/test_bilateral_rotation.py` (8 tests) - bilateral integration
+- ✅ Integration tests (5 tests in `tests/integration/test_rotation_protocol.py`):
+  - Full rotation handshake between two channels
+  - Message serialization over wire
+  - Multiple sequential rotations
+  - Failure recovery
+- ✅ All 769 tests passing
+
+**Key Features:**
+- Automatic rotation based on configurable thresholds
+- Message count trigger (default: 1M messages)
+- Time-based trigger (default: 24 hours)
+- Manual rotation support
+- X25519 DH for forward secrecy
+- Deterministic key derivation (symmetric for both runtimes)
+- Step counter preservation during rotation
+- Independent rotation tracking per bilateral channel
+- Rotation session state machine with retry support
+- Wire protocol messages (RekeyRequest/RekeyAccept)
+
+**Security Properties:**
+- Forward secrecy via ephemeral X25519 keypairs
+- Mitigates key fatigue on long-lived channels
+- Combines old state with new DH secret (prevents state reset)
+- Deterministic derivation ensures both sides derive identical keys
+- Rotation does not reset step counter (maintains continuity)
 
 ---
 
