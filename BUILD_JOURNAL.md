@@ -413,9 +413,9 @@ class IncrementalSg:
 
 ### 2. Storage Circuit Breakers
 
-**Status:** Not Started
+**Status:** ✅ Complete
 **Priority:** High
-**Estimate:** 2-3 days
+**Completed:** 2026-03-11
 
 #### Motivation
 
@@ -490,6 +490,26 @@ class StorageCircuitBreaker:
 - Unit tests: Circuit breaker state machine
 - Integration tests: Simulate storage failures, verify OPEN state
 - E2E tests: Recovery from transient failures
+
+**Implementation Summary:**
+- ✅ Implemented `mfp/observability/circuit_breaker.py` with full state machine
+- ✅ Wrapped all critical storage operations in `mfp/storage/engine.py`:
+  - `save_channel()` — protected by circuit breaker
+  - `advance_channel()` — protected by circuit breaker
+  - `save_agent()` — protected by circuit breaker
+  - `save_sg_cache()` — protected by circuit breaker
+  - `recover()` — protected by circuit breaker
+- ✅ Unit tests for circuit breaker (12 tests in `tests/unit/test_circuit_breaker.py`)
+- ✅ Integration tests for storage failures (6 tests in `tests/integration/test_storage_circuit_breaker.py`)
+- ✅ All 700 tests passing
+
+**Key Features:**
+- Configurable failure threshold (default: 5 failures)
+- Configurable timeout (default: 30 seconds)
+- HALF_OPEN state with configurable max attempts (default: 3)
+- Success threshold for closing (default: 2)
+- Raises `CircuitBreakerOpen` exception when circuit is OPEN
+- Applications can catch `CircuitBreakerOpen` for graceful degradation
 
 ---
 

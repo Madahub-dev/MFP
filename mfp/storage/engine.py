@@ -27,6 +27,11 @@ from mfp.core.types import (
     DEFAULT_FRAME_DEPTH,
 )
 
+from mfp.observability.circuit_breaker import (
+    CircuitBreaker,
+    CircuitBreakerConfig,
+    CircuitBreakerOpen,
+)
 from mfp.observability.logging import LogContext, TimedOperation, get_logger
 from mfp.storage.crypto import decrypt_cell, derive_storage_key, encrypt_cell
 from mfp.storage.schema import (
@@ -133,7 +138,7 @@ class StorageEngine:
     Maps to: I-14 §7.
     """
 
-    def __init__(self, config: StorageConfig) -> None:
+    def __init__(self, config: StorageConfig, breaker_config: CircuitBreakerConfig | None = None) -> None:
         self._config = config
         db = config.db_path or ":memory:"
         self._conn = sqlite3.connect(db)
@@ -142,6 +147,9 @@ class StorageEngine:
 
         self._storage_key: StateValue | None = None
         self._runtime_id: bytes = b""
+
+        # Circuit breaker for resilience against storage failures
+        self._circuit_breaker = CircuitBreaker("storage", breaker_config)
 
         # Log storage initialization
         context = LogContext(
@@ -266,26 +274,32 @@ class StorageEngine:
         state: str,
         runtime_id: bytes,
     ) -> None:
-        """Save a new agent. Atomic with counter increment."""
-        now = int(time.time())
-        self._conn.execute("BEGIN IMMEDIATE")
-        try:
-            self._conn.execute(
-                "UPDATE runtime_meta SET agent_counter = agent_counter + 1 "
-                "WHERE runtime_id = ?",
-                (runtime_id,),
-            )
-            self._conn.execute(
-                """INSERT INTO agents
-                   (agent_id, state, message_count, quarantine_reason,
-                    created_at, updated_at)
-                   VALUES (?, ?, 0, '', ?, ?)""",
-                (agent_id, state, now, now),
-            )
-            self._conn.execute("COMMIT")
-        except Exception:
-            self._conn.execute("ROLLBACK")
-            raise
+        """Save a new agent. Atomic with counter increment.
+
+        Protected by circuit breaker. Raises CircuitBreakerOpen if storage unavailable.
+        """
+        def _save():
+            now = int(time.time())
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._conn.execute(
+                    "UPDATE runtime_meta SET agent_counter = agent_counter + 1 "
+                    "WHERE runtime_id = ?",
+                    (runtime_id,),
+                )
+                self._conn.execute(
+                    """INSERT INTO agents
+                       (agent_id, state, message_count, quarantine_reason,
+                        created_at, updated_at)
+                       VALUES (?, ?, 0, '', ?, ?)""",
+                    (agent_id, state, now, now),
+                )
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+
+        self._circuit_breaker.execute(_save)
 
     def update_agent_state(
         self,
@@ -321,45 +335,51 @@ class StorageEngine:
     # ------------------------------------------------------------------
 
     def save_channel(self, channel: Channel, sg: GlobalState | None) -> None:
-        """Persist a newly established channel. Atomic with Sg cache update."""
-        now = int(time.time())
-        local_state_bytes = self._encrypt(
-            "channels", "local_state",
-            channel.channel_id.value,
-            channel.state.local_state.data,
-        )
+        """Persist a newly established channel. Atomic with Sg cache update.
 
-        self._conn.execute("BEGIN IMMEDIATE")
-        try:
-            self._conn.execute(
-                """INSERT INTO channels
-                   (channel_id, agent_a, agent_b, local_state, step, depth,
-                    status, validation_failure_count, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)""",
-                (
-                    channel.channel_id.value,
-                    channel.agent_a.value,
-                    channel.agent_b.value,
-                    local_state_bytes,
-                    channel.state.step,
-                    channel.depth,
-                    channel.status.value,
-                    now,
-                    now,
-                ),
+        Protected by circuit breaker. Raises CircuitBreakerOpen if storage unavailable.
+        """
+        def _save():
+            now = int(time.time())
+            local_state_bytes = self._encrypt(
+                "channels", "local_state",
+                channel.channel_id.value,
+                channel.state.local_state.data,
             )
-            # Update agent states to active if bound
-            self._conn.execute(
-                "UPDATE agents SET state = 'active', updated_at = ? "
-                "WHERE agent_id IN (?, ?) AND state = 'bound'",
-                (now, channel.agent_a.value, channel.agent_b.value),
-            )
-            if sg is not None:
-                self._save_sg_cache_inner(sg)
-            self._conn.execute("COMMIT")
-        except Exception:
-            self._conn.execute("ROLLBACK")
-            raise
+
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._conn.execute(
+                    """INSERT INTO channels
+                       (channel_id, agent_a, agent_b, local_state, step, depth,
+                        status, validation_failure_count, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)""",
+                    (
+                        channel.channel_id.value,
+                        channel.agent_a.value,
+                        channel.agent_b.value,
+                        local_state_bytes,
+                        channel.state.step,
+                        channel.depth,
+                        channel.status.value,
+                        now,
+                        now,
+                    ),
+                )
+                # Update agent states to active if bound
+                self._conn.execute(
+                    "UPDATE agents SET state = 'active', updated_at = ? "
+                    "WHERE agent_id IN (?, ?) AND state = 'bound'",
+                    (now, channel.agent_a.value, channel.agent_b.value),
+                )
+                if sg is not None:
+                    self._save_sg_cache_inner(sg)
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+
+        self._circuit_breaker.execute(_save)
 
     def advance_channel(
         self,
@@ -367,25 +387,31 @@ class StorageEngine:
         new_local_state: StateValue,
         sg: GlobalState,
     ) -> None:
-        """Persist channel state advancement. Atomic Sₗ + step + Sg."""
-        now = int(time.time())
-        local_state_bytes = self._encrypt(
-            "channels", "local_state", channel_id, new_local_state.data,
-        )
+        """Persist channel state advancement. Atomic Sₗ + step + Sg.
 
-        self._conn.execute("BEGIN IMMEDIATE")
-        try:
-            self._conn.execute(
-                "UPDATE channels SET local_state = ?, step = step + 1, "
-                "validation_failure_count = 0, updated_at = ? "
-                "WHERE channel_id = ?",
-                (local_state_bytes, now, channel_id),
+        Protected by circuit breaker. Raises CircuitBreakerOpen if storage unavailable.
+        """
+        def _advance():
+            now = int(time.time())
+            local_state_bytes = self._encrypt(
+                "channels", "local_state", channel_id, new_local_state.data,
             )
-            self._save_sg_cache_inner(sg)
-            self._conn.execute("COMMIT")
-        except Exception:
-            self._conn.execute("ROLLBACK")
-            raise
+
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._conn.execute(
+                    "UPDATE channels SET local_state = ?, step = step + 1, "
+                    "validation_failure_count = 0, updated_at = ? "
+                    "WHERE channel_id = ?",
+                    (local_state_bytes, now, channel_id),
+                )
+                self._save_sg_cache_inner(sg)
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+
+        self._circuit_breaker.execute(_advance)
 
     def close_channel(
         self,
@@ -544,9 +570,15 @@ class StorageEngine:
         )
 
     def save_sg_cache(self, sg: GlobalState) -> None:
-        """Save Sg cache as a standalone operation."""
-        self._save_sg_cache_inner(sg)
-        self._conn.commit()
+        """Save Sg cache as a standalone operation.
+
+        Protected by circuit breaker. Raises CircuitBreakerOpen if storage unavailable.
+        """
+        def _save():
+            self._save_sg_cache_inner(sg)
+            self._conn.commit()
+
+        self._circuit_breaker.execute(_save)
 
     def load_sg_cache(self) -> GlobalState | None:
         """Load cached Sg. Returns None if not cached."""
@@ -568,94 +600,99 @@ class StorageEngine:
 
         Returns None if the database is empty (first startup).
 
+        Protected by circuit breaker. Raises CircuitBreakerOpen if storage unavailable.
+
         Maps to: I-14 §6.
         """
-        context = LogContext(
-            correlation_id="recovery",
-            runtime_id="",
-            operation="recover",
-        )
-
-        meta = self.load_runtime_meta()
-        if meta is None:
-            logger.info("No existing state found, fresh start", context=context)
-            return None
-
-        with TimedOperation("storage_recovery", context):
-            # Verify runtime identity
-            expected_id = sha256(meta.deployment_id + meta.instance_id)
-        warnings: list[str] = []
-        if meta.runtime_id != expected_id.data:
-            warnings.append(
-                "Runtime ID mismatch: stored does not match derived"
+        def _recover() -> RecoveryResult | None:
+            context = LogContext(
+                correlation_id="recovery",
+                runtime_id="",
+                operation="recover",
             )
 
-        # Check schema version
-        version = get_schema_version(self._conn)
-        if version is not None and version < SCHEMA_VERSION:
-            migrate(self._conn, version, SCHEMA_VERSION)
+            meta = self.load_runtime_meta()
+            if meta is None:
+                logger.info("No existing state found, fresh start", context=context)
+                return None
 
-        # Load agents
-        agents = self.load_agents()
-
-        # Load channels and verify
-        channels = self.load_channels()
-        agent_ids = {a.agent_id for a in agents}
-        for ch in channels:
-            if ch.agent_a not in agent_ids:
+            with TimedOperation("storage_recovery", context):
+                # Verify runtime identity
+                expected_id = sha256(meta.deployment_id + meta.instance_id)
+            warnings: list[str] = []
+            if meta.runtime_id != expected_id.data:
                 warnings.append(
-                    f"Channel {ch.channel_id.hex()[:8]} references unknown agent_a"
-                )
-            if ch.agent_b not in agent_ids:
-                warnings.append(
-                    f"Channel {ch.channel_id.hex()[:8]} references unknown agent_b"
-                )
-            if len(ch.local_state) != 32:
-                warnings.append(
-                    f"Channel {ch.channel_id.hex()[:8]} has invalid local_state size"
+                    "Runtime ID mismatch: stored does not match derived"
                 )
 
-        # Load bilateral channels
-        bilateral = self.load_bilateral_channels()
+            # Check schema version
+            version = get_schema_version(self._conn)
+            if version is not None and version < SCHEMA_VERSION:
+                migrate(self._conn, version, SCHEMA_VERSION)
 
-        # Recompute Sg using Merkle tree (same method as Runtime)
-        sg: GlobalState | None = None
-        if channels:
-            try:
-                sg = compose_ordered_incremental(
-                    channel_states=[
-                        (ChannelId(ch.channel_id), StateValue(ch.local_state))
-                        for ch in channels
-                    ],
-                )
-            except Exception as e:
-                warnings.append(f"Failed to recompute Sg: {e}")
+            # Load agents
+            agents = self.load_agents()
 
-            # Verify against cache
-            cached_sg = self.load_sg_cache()
-            if cached_sg and sg and cached_sg.value.data != sg.value.data:
-                warnings.append("Cached Sg mismatch — using recomputed value")
+            # Load channels and verify
+            channels = self.load_channels()
+            agent_ids = {a.agent_id for a in agents}
+            for ch in channels:
+                if ch.agent_a not in agent_ids:
+                    warnings.append(
+                        f"Channel {ch.channel_id.hex()[:8]} references unknown agent_a"
+                    )
+                if ch.agent_b not in agent_ids:
+                    warnings.append(
+                        f"Channel {ch.channel_id.hex()[:8]} references unknown agent_b"
+                    )
+                if len(ch.local_state) != 32:
+                    warnings.append(
+                        f"Channel {ch.channel_id.hex()[:8]} has invalid local_state size"
+                    )
 
-        result = RecoveryResult(
-            meta=meta,
-            agents=agents,
-            channels=channels,
-            bilateral_channels=bilateral,
-            sg=sg,
-            warnings=warnings,
-        )
+            # Load bilateral channels
+            bilateral = self.load_bilateral_channels()
 
-        logger.info(
-            "Recovery completed",
-            context=context,
-            agent_count=len(agents),
-            channel_count=len(channels),
-            bilateral_count=len(bilateral),
-            warnings_count=len(warnings),
-        )
+            # Recompute Sg using Merkle tree (same method as Runtime)
+            sg: GlobalState | None = None
+            if channels:
+                try:
+                    sg = compose_ordered_incremental(
+                        channel_states=[
+                            (ChannelId(ch.channel_id), StateValue(ch.local_state))
+                            for ch in channels
+                        ],
+                    )
+                except Exception as e:
+                    warnings.append(f"Failed to recompute Sg: {e}")
 
-        if warnings:
-            for warning in warnings:
-                logger.warning(f"Recovery warning: {warning}", context=context)
+                # Verify against cache
+                cached_sg = self.load_sg_cache()
+                if cached_sg and sg and cached_sg.value.data != sg.value.data:
+                    warnings.append("Cached Sg mismatch — using recomputed value")
 
-        return result
+            result = RecoveryResult(
+                meta=meta,
+                agents=agents,
+                channels=channels,
+                bilateral_channels=bilateral,
+                sg=sg,
+                warnings=warnings,
+            )
+
+            logger.info(
+                "Recovery completed",
+                context=context,
+                agent_count=len(agents),
+                channel_count=len(channels),
+                bilateral_count=len(bilateral),
+                warnings_count=len(warnings),
+            )
+
+            if warnings:
+                for warning in warnings:
+                    logger.warning(f"Recovery warning: {warning}", context=context)
+
+            return result
+
+        return self._circuit_breaker.execute(_recover)
