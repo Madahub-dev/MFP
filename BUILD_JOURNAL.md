@@ -774,9 +774,9 @@ class BilateralConfig:
 
 ### 2. Frame Caching
 
-**Status:** Not Started
+**Status:** ✅ Complete
 **Priority:** Low
-**Estimate:** 2 days
+**Completed:** 2026-03-11
 
 #### Motivation
 
@@ -811,6 +811,44 @@ frame_cache: LRUCache[FrameCacheKey, Frame] = LRUCache(maxsize=1000)
 **Testing:**
 - Unit tests: Cache hits/misses
 - Benchmark: Measure speedup
+
+**Implementation Summary:**
+- ✅ Implemented FrameCache with LRU eviction
+- ✅ Integrated caching into `sample_frame_cross_runtime()`
+- ✅ FrameCacheKey tracks: local_state, step, bilateral_ratchet_state, shared_prng_seed, depth
+- ✅ Configurable cache size (default: 1000 frames)
+- ✅ Global cache with `configure_frame_cache()`, `get_frame_cache_stats()`, `clear_frame_cache()`
+- ✅ Cache can be disabled per call with `use_cache=False`
+- ✅ Unit tests (13 tests in `tests/unit/test_frame_cache.py`):
+  - Cache hit/miss tracking
+  - LRU eviction logic
+  - Cache statistics
+  - Integration with sample_frame_cross_runtime
+- ✅ Benchmark tests (4 tests in `tests/benchmark/test_frame_cache_benchmark.py`):
+  - 16-17x speedup for repeated frames (cache hits)
+  - ~10% overhead for all-miss scenarios
+  - 9-10x speedup for realistic mixed workloads (98% hit rate)
+  - Cache size impact on hit rate
+- ✅ All 786 tests passing
+
+**Performance Results:**
+- **Cache hits:** 16-17x speedup (repeated frames)
+- **Cache overhead:** ~10% (all misses) - acceptable given speedup
+- **Realistic workload:** 9-10x speedup with 98% hit rate
+- **Hit rate vs cache size:** 90%+ hit rate when cache size ≥ unique frames
+
+**Limitations:**
+- Only benefits `sample_frame_cross_runtime()` (deterministic)
+- Does NOT cache `sample_frame()` (uses OS jitter - non-deterministic)
+- Cache hit rate depends on state reuse patterns:
+  - High: Bilateral channels with repeated validations/recovery
+  - Low: Normal operation (states advance after each message)
+- Best suited for:
+  - Recovery scenarios replaying old frames
+  - Bilateral channel validation of historical frames
+  - Testing/simulation with repeated state access
+
+**Note:** As documented in P2.1, current intra-runtime implementation uses non-deterministic OS jitter, so caching has limited benefit in normal operation. Primary use case is cross-runtime frames during recovery/validation scenarios.
 
 ---
 

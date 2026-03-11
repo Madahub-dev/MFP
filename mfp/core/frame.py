@@ -3,10 +3,16 @@
 Two sampling modes (intra-runtime with OS jitter, cross-runtime with
 per-step PRNG jitter) sharing one distribution seed derivation.
 
+Frame caching (P3.2) for cross-runtime frames to avoid redundant
+ChaCha20 keystream generation.
+
 Maps to: impl/I-04_frame.md
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
+from functools import lru_cache
 
 from mfp.core.primitives import (
     ChaCha20PRNG,
@@ -23,6 +29,106 @@ from mfp.core.types import (
     ProtocolMessage,
     StateValue,
 )
+
+
+# ---------------------------------------------------------------------------
+# Frame Cache (P3.2)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class FrameCacheKey:
+    """Cache key for deterministic frame sampling.
+
+    Only used for cross-runtime frames (deterministic).
+    Intra-runtime frames use OS jitter and cannot be cached.
+    """
+    local_state: bytes  # Sl (StateValue.data)
+    step: int  # t
+    bilateral_ratchet_state: bytes  # Acts as Sg for cross-runtime
+    shared_prng_seed: bytes  # For jitter derivation
+    depth: int
+
+
+class FrameCache:
+    """LRU cache for cross-runtime frame sampling.
+
+    Caches deterministic frames to avoid redundant ChaCha20 computations.
+    Note: Cache hit rate depends on state reuse patterns.
+    """
+
+    def __init__(self, maxsize: int = 1000):
+        self.maxsize = maxsize
+        self._cache: dict[FrameCacheKey, Frame] = {}
+        self._hits = 0
+        self._misses = 0
+        self._access_order: list[FrameCacheKey] = []
+
+    def get(self, key: FrameCacheKey) -> Frame | None:
+        """Get cached frame if exists."""
+        if key in self._cache:
+            self._hits += 1
+            # Update LRU order
+            self._access_order.remove(key)
+            self._access_order.append(key)
+            return self._cache[key]
+        self._misses += 1
+        return None
+
+    def put(self, key: FrameCacheKey, frame: Frame) -> None:
+        """Cache a frame with LRU eviction."""
+        if key in self._cache:
+            # Update existing
+            self._access_order.remove(key)
+            self._access_order.append(key)
+            self._cache[key] = frame
+            return
+
+        # Add new entry
+        if len(self._cache) >= self.maxsize:
+            # Evict LRU
+            lru_key = self._access_order.pop(0)
+            del self._cache[lru_key]
+
+        self._cache[key] = frame
+        self._access_order.append(key)
+
+    def get_stats(self) -> tuple[int, int, float]:
+        """Get cache statistics: (hits, misses, hit_rate).
+
+        Returns (0, 0, 0.0) if no accesses yet.
+        """
+        total = self._hits + self._misses
+        if total == 0:
+            return 0, 0, 0.0
+        hit_rate = self._hits / total
+        return self._hits, self._misses, hit_rate
+
+    def clear(self) -> None:
+        """Clear cache and reset statistics."""
+        self._cache.clear()
+        self._access_order.clear()
+        self._hits = 0
+        self._misses = 0
+
+
+# Global frame cache (can be configured)
+_frame_cache = FrameCache(maxsize=1000)
+
+
+def configure_frame_cache(maxsize: int) -> None:
+    """Configure global frame cache size."""
+    global _frame_cache
+    _frame_cache = FrameCache(maxsize=maxsize)
+
+
+def get_frame_cache_stats() -> tuple[int, int, float]:
+    """Get global frame cache statistics."""
+    return _frame_cache.get_stats()
+
+
+def clear_frame_cache() -> None:
+    """Clear global frame cache."""
+    _frame_cache.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -92,14 +198,44 @@ def sample_frame_cross_runtime(
     bilateral_ratchet_state: StateValue,
     shared_prng_seed: StateValue,
     depth: int = DEFAULT_FRAME_DEPTH,
+    use_cache: bool = True,
 ) -> Frame:
     """Sample a frame using per-step PRNG jitter (cross-runtime).
 
     Both runtimes produce identical frames deterministically.
     Idempotent per step — repeated derivation yields the same frame.
 
+    Caching (P3.2): Caches deterministic frames to avoid redundant
+    ChaCha20 keystream generation. Cache hit rate depends on state
+    reuse patterns.
+
+    Args:
+        local_state: Local channel state (Sl)
+        step: Channel step counter (t)
+        bilateral_ratchet_state: Bilateral ratchet state (acts as Sg)
+        shared_prng_seed: Shared PRNG seed for jitter derivation
+        depth: Frame depth (number of blocks)
+        use_cache: Whether to use frame cache (default: True)
+
+    Returns:
+        Sampled frame
+
     Maps to: spec.md §5.4.
     """
+    # Check cache first
+    if use_cache:
+        cache_key = FrameCacheKey(
+            local_state=local_state.data,
+            step=step,
+            bilateral_ratchet_state=bilateral_ratchet_state.data,
+            shared_prng_seed=shared_prng_seed.data,
+            depth=depth,
+        )
+        cached_frame = _frame_cache.get(cache_key)
+        if cached_frame is not None:
+            return cached_frame
+
+    # Cache miss or caching disabled - compute frame
     # Distribution seed — uses bilateral ratchet_state as Sg substitute
     ds = derive_distribution_seed(local_state, step, bilateral_ratchet_state)
     prng = ChaCha20PRNG(ds)
@@ -115,7 +251,13 @@ def sample_frame_cross_runtime(
         block_data = xor_bytes(candidate, jitter)
         blocks.append(Block(block_data))
 
-    return Frame(tuple(blocks))
+    frame = Frame(tuple(blocks))
+
+    # Store in cache
+    if use_cache:
+        _frame_cache.put(cache_key, frame)
+
+    return frame
 
 
 # ---------------------------------------------------------------------------
