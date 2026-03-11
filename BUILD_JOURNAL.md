@@ -610,9 +610,9 @@ def with_timeout(func, timeout):
 
 ### 4. Connection Pooling Improvements
 
-**Status:** Not Started
+**Status:** ✅ Complete
 **Priority:** Medium
-**Estimate:** 2-3 days
+**Completed:** 2026-03-11
 
 #### Motivation
 
@@ -673,6 +673,33 @@ class ConnectionPool:
 - Unit tests: Pool eviction, reuse
 - Integration tests: Keepalive detection
 - E2E tests: Graceful shutdown
+
+**Implementation Summary:**
+- ✅ Enhanced ConnectionPool with idle eviction and lifetime limits
+- ✅ Added ConnectionMetadata to track created_at and last_used timestamps
+- ✅ Background eviction task runs every eviction_interval_seconds:
+  - Evicts connections idle for > idle_timeout_seconds (default: 5 minutes)
+  - Evicts connections alive for > max_connection_lifetime_seconds (default: 1 hour)
+- ✅ Connection reuse with automatic last_used updates
+- ✅ Graceful shutdown:
+  - Stops eviction task
+  - Closes all connections properly
+  - Prevents new eviction tasks after shutdown
+- ✅ Added config fields to TransportConfig:
+  - `idle_timeout_seconds: float = 300.0`
+  - `max_connection_lifetime_seconds: float = 3600.0`
+  - `eviction_interval_seconds: float = 60.0`
+- ✅ Unit tests (10 tests in `tests/unit/test_connection_pool.py`)
+- ✅ All 723 tests passing
+
+**Key Features:**
+- Automatic idle connection cleanup (saves resources)
+- Connection lifetime limits (prevents long-lived connection issues)
+- Connection reuse (reduces connection overhead)
+- Graceful shutdown with proper cleanup
+- Configurable eviction policies
+
+**Note:** Keepalive ping/pong mechanism deferred - requires wire protocol changes
 
 ---
 
