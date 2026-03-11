@@ -25,6 +25,7 @@ from mfp.core.types import (
     RuntimeId,
     StateValue,
 )
+from mfp.observability.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +164,11 @@ class BilateralChannel:
     """A bilateral channel between two runtimes.
 
     Manages the shared state and tracks pending acknowledgments.
+
+    Circuit breaker (P3.1):
+    - Tracks failures per bilateral channel
+    - Opens after N consecutive failures
+    - Prevents cascading failures from problematic peers
     """
     bilateral_id: bytes
     local_runtime: RuntimeId
@@ -173,6 +179,14 @@ class BilateralChannel:
     cross_runtime_channels: list[CrossRuntimeChannel] = field(
         default_factory=list,
     )
+    _circuit_breaker: CircuitBreaker | None = field(default=None, init=False)
+
+    def get_circuit_breaker(self, config: CircuitBreakerConfig | None = None) -> CircuitBreaker:
+        """Get or create circuit breaker for this bilateral channel."""
+        if self._circuit_breaker is None:
+            name = f"bilateral_{self.bilateral_id.hex()[:8]}"
+            self._circuit_breaker = CircuitBreaker(name, config)
+        return self._circuit_breaker
 
 
 def derive_bilateral_id(
