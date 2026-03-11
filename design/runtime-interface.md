@@ -3,7 +3,7 @@
 ```yaml
 id: mfp-runtime-interface
 type: spec
-status: draft
+status: complete
 created: 2026-03-10
 revised: 2026-03-10
 authors:
@@ -656,4 +656,4 @@ Step 5 MUST use constant-time comparison to prevent timing side channels (`threa
 
 ---
 
-*Mada OS — authored by Akil Abderrahim and Claude Opus 4.6*
+*MFP — authored by Akil Abderrahim and Claude Opus 4.6*

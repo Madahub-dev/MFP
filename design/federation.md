@@ -3,7 +3,7 @@
 ```yaml
 id: mfp-federation
 type: spec
-status: draft
+status: complete
 created: 2026-03-10
 revised: 2026-03-10
 authors:
@@ -633,4 +633,4 @@ The recovery protocol (§7) introduces an attack surface:
 
 ---
 
-*Mada OS — authored by Akil Abderrahim and Claude Opus 4.6*
+*MFP — authored by Akil Abderrahim and Claude Opus 4.6*

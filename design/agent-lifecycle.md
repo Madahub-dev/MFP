@@ -3,7 +3,7 @@
 ```yaml
 id: mfp-agent-lifecycle
 type: spec
-status: draft
+status: complete
 created: 2026-03-10
 revised: 2026-03-10
 authors:
@@ -521,4 +521,4 @@ The transitions `bound → active` (first channel) and `active → bound` (last 
 
 ---
 
-*Mada OS — authored by Akil Abderrahim and Claude Opus 4.6*
+*MFP — authored by Akil Abderrahim and Claude Opus 4.6*

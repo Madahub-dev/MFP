@@ -3,7 +3,7 @@
 ```yaml
 id: mfp-spec
 type: spec
-status: draft
+status: complete
 created: 2026-02-28
 revised: 2026-02-28
 authors:
@@ -705,4 +705,4 @@ The default `k = 4` exceeds the minimum by a factor of two, providing defense in
 
 ---
 
-*Mada OS — authored by Akil Abderrahim and Claude Opus 4.6*
+*MFP — authored by Akil Abderrahim and Claude Opus 4.6*
