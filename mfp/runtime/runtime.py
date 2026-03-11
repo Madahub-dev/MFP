@@ -454,6 +454,16 @@ class Runtime:
                 deliver=dest_rec.callable,
                 correlation_id=correlation_id,
             )
+        except AgentError as e:
+            # Agent timeout: quarantine the destination agent
+            if e.code == AgentErrorCode.TIMEOUT:
+                self._logger.warning(
+                    f"Agent timeout, quarantining destination agent: {str(e)}",
+                    context=context,
+                    dest_agent=dest_id.value.hex()[:8],
+                )
+                self.quarantine_agent(dest_id, f"Agent callable timeout: {str(e)}")
+            raise
         except FrameValidationError as e:
             # Validation failure: track and potentially quarantine
             increment_failure_count(channel)

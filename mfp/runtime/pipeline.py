@@ -35,6 +35,7 @@ from mfp.core.types import (
     StateValue,
 )
 from mfp.observability.logging import LogContext, TimedOperation, get_logger
+from mfp.observability.timeout import TimeoutError as OperationTimeoutError, with_timeout
 
 logger = get_logger(__name__)
 
@@ -60,6 +61,10 @@ class RuntimeConfig:
     max_agents: int = 10_000
     max_bilateral_channels: int = 100
     max_storage_size_mb: int = 1024  # 1 GB
+    # Timeouts (P2.3)
+    agent_timeout_seconds: float = 30.0    # Agent callable timeout
+    pipeline_timeout_seconds: float = 5.0  # Pipeline processing timeout
+    storage_timeout_seconds: float = 10.0  # Storage operation timeout
 
 
 @dataclass(frozen=True)
@@ -195,10 +200,16 @@ def deliver_stage(
     message_id: MessageId,
     deliver: AgentCallable,
     correlation_id: str = "",
+    agent_timeout_seconds: float = 30.0,
 ) -> DeliveredMessage:
     """Deliver decoded message to the destination agent.
 
+    Agent callable execution is protected by timeout to prevent blocking.
+
     Maps to: runtime-interface.md §4.7.
+
+    Raises:
+        OperationTimeoutError: If agent callable exceeds timeout
     """
     msg = DeliveredMessage(
         payload=payload,
@@ -207,7 +218,29 @@ def deliver_stage(
         message_id=message_id,
         correlation_id=correlation_id,
     )
-    deliver(msg)
+
+    # Wrap agent callable with timeout protection
+    try:
+        with_timeout(
+            lambda: deliver(msg),
+            timeout_seconds=agent_timeout_seconds,
+            operation_name=f"agent_callable_{sender.value.hex()[:8]}",
+        )
+    except OperationTimeoutError as e:
+        # Agent timeout should trigger quarantine
+        logger.error(
+            f"Agent callable timeout: {e}",
+            extra={
+                "agent_id": sender.value.hex()[:8],
+                "channel_id": channel_id.value.hex()[:8],
+                "timeout_seconds": agent_timeout_seconds,
+            }
+        )
+        raise AgentError(
+            AgentErrorCode.TIMEOUT,
+            f"Agent callable exceeded timeout of {agent_timeout_seconds}s"
+        )
+
     return msg
 
 
@@ -270,7 +303,15 @@ def process_message(
     # Stage 6: DELIVER
     context.stage = "DELIVER"
     with TimedOperation("deliver", context):
-        delivered = deliver_stage(decoded, sender, channel.channel_id, message_id, deliver, correlation_id)
+        delivered = deliver_stage(
+            decoded,
+            sender,
+            channel.channel_id,
+            message_id,
+            deliver,
+            correlation_id,
+            agent_timeout_seconds=config.agent_timeout_seconds,
+        )
 
     # Compute new state (not yet applied)
     new_local = advance(channel.state.local_state, frame)
