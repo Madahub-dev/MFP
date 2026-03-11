@@ -9,6 +9,8 @@ MFP is a protocol and runtime for secure, peer-to-peer communication between aut
 - **Symmetric design** — no client/server distinction, all agents are peers
 - **End-to-end encryption** — ChaCha20-Poly1305 AEAD with X25519 key exchange
 - **Federation-ready** — bilateral channels, recovery protocols, TCP transport
+- **Production hardening** — circuit breakers, timeouts, health checks, metrics
+- **High performance** — Merkle tree for O(log N) global state updates
 - **Library-first** — runtime embeds in any Python process
 - **Standalone server** — YAML-configured process for managing agents
 - **Type-safe** — full type annotations with `py.typed` marker
@@ -109,6 +111,7 @@ Run this script to see agents communicate through MFP channels.
 ## Documentation
 
 - [Quickstart Guide](docs/quickstart.md) — step-by-step tutorial
+- [Production Guide](docs/production-guide.md) — deployment and operations
 - [API Reference](docs/api-reference.md) — library interface documentation
 - [Server Guide](docs/server-guide.md) — standalone server configuration
 - [Architecture](docs/architecture.md) — design deep-dive
@@ -148,9 +151,15 @@ pytest --cov=mfp --cov-report=term-missing
 
 ## Project Status
 
-**Version:** 0.1.0 (Alpha)
+**Version:** 0.4.0 (Production Ready)
 
-All 5 implementation phases complete. 19 specifications implemented across 25 modules, 604 tests passing. The protocol is functional and ready for experimental use.
+All implementation phases complete including production hardening:
+- ✅ P0: Critical Security
+- ✅ P1: Operational Robustness (logging, health checks, metrics, limits)
+- ✅ P2: Performance Optimization (Merkle tree, circuit breakers, timeouts, pooling)
+- ✅ P3: Advanced Hardening (frame caching, key rotation, deduplication)
+
+**Test Coverage:** 813 tests passing (591 unit, 191 integration, 27 E2E, 4 benchmark)
 
 ## License
 
@@ -158,7 +167,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ## Credits
 
-**Mada OS** — authored by Akil Abderrahim and Claude Opus 4.6
+**MFP** — authored by Akil Abderrahim and Claude Sonnet 4.5
 
 ---
 
