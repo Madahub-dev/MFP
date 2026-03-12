@@ -18,7 +18,7 @@ MFP is a protocol and runtime for secure, peer-to-peer communication between aut
 ## Installation
 
 ```bash
-pip install mfp
+pip install pymfp
 ```
 
 Or install from source:

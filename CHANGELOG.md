@@ -101,7 +101,7 @@ Existing deployments must either:
 
 **Packaging**
 - PEP 621 compliant `pyproject.toml`
-- pip installable (`pip install mfp`)
+- pip installable (`pip install pymfp`)
 - Type annotations with `py.typed` marker
 - Apache 2.0 license
 - Python 3.11+ support

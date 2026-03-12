@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mfp"
+name = "pymfp"
 version = "0.1.0"
 description = "Mirror Frame Protocol — symmetric frame envelope for LLM agent communication"
 readme = "README.md"

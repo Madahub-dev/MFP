@@ -36,6 +36,7 @@
    - Repository: `MFP`
    - Workflow: `publish.yml`
    - Environment: `pypi` (or `testpypi`)
+   - Project name: `pymfp`
 
 ### 2. GitHub Branch Protection
 
@@ -87,8 +88,8 @@ tar -tzf dist/mfp-0.1.0.tar.gz
 ```
 
 Expected outputs:
-- `dist/mfp-0.1.0.tar.gz` (source distribution)
-- `dist/mfp-0.1.0-py3-none-any.whl` (wheel distribution)
+- `dist/pymfp-0.1.0.tar.gz` (source distribution)
+- `dist/pymfp-0.1.0-py3-none-any.whl` (wheel distribution)
 
 ### 5. Test Upload to TestPyPI
 
@@ -107,7 +108,7 @@ Before publishing to production PyPI, test with TestPyPI:
 twine upload --repository testpypi dist/*
 
 # Test installation
-pip install --index-url https://test.pypi.org/simple/ --no-deps mfp
+pip install --index-url https://test.pypi.org/simple/ --no-deps pymfp
 ```
 
 ### 6. Create the First Release
@@ -161,15 +162,15 @@ After successful release:
 
 1. **Verify PyPI upload:**
    ```bash
-   pip install mfp
+   pip install pymfp
    python -c "import mfp; print(mfp.__version__)"
    ```
 
 2. **Update README badge (optional):**
    Add to README.md:
    ```markdown
-   [![PyPI version](https://badge.fury.io/py/mfp.svg)](https://pypi.org/project/mfp/)
-   [![Python versions](https://img.shields.io/pypi/pyversions/mfp.svg)](https://pypi.org/project/mfp/)
+   [![PyPI version](https://badge.fury.io/py/pymfp.svg)](https://pypi.org/project/pymfp/)
+   [![Python versions](https://img.shields.io/pypi/pyversions/pymfp.svg)](https://pypi.org/project/pymfp/)
    ```
 
 3. **Announce the release:**
