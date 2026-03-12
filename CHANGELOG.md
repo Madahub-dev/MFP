@@ -103,7 +103,7 @@ Existing deployments must either:
 - PEP 621 compliant `pyproject.toml`
 - pip installable (`pip install mfp`)
 - Type annotations with `py.typed` marker
-- MIT license
+- Apache 2.0 license
 - Python 3.11+ support
 
 ### Notes

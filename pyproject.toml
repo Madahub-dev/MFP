@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Mirror Frame Protocol — symmetric frame envelope for LLM agent communication"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 authors = [
     {name = "Akil Abderrahim"},
 ]
@@ -16,7 +16,7 @@ keywords = ["llm", "agents", "protocol", "communication", "e2ee"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -43,8 +43,8 @@ dev = [
 mfp-server = "mfp.server:main"
 
 [project.urls]
-Homepage = "https://github.com/Madahub-dev/MFP"
-Repository = "https://github.com/Madahub-dev/MFP"
+Homepage = "https://madahub.org"
+Repository = "https://github.com/madahub/mirror-frame-protocol"
 
 [tool.setuptools]
 packages = ["mfp", "mfp.core", "mfp.runtime", "mfp.agent", "mfp.storage", "mfp.federation"]

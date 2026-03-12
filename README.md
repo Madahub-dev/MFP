@@ -24,7 +24,7 @@ pip install mfp
 Or install from source:
 
 ```bash
-git clone https://github.com/Madahub-dev/MFP.git
+git clone https://github.com/madahub/mirror-frame-protocol.git
 cd MFP
 pip install -e .
 ```
@@ -138,7 +138,7 @@ Set up development environment:
 
 ```bash
 # Clone and install with dev dependencies
-git clone https://github.com/madaOS/mirror-frame-protocol.git
+git clone https://github.com/madahub/mirror-frame-protocol.git
 cd mirror-frame-protocol
 pip install -e ".[dev]"
 
@@ -163,7 +163,7 @@ All implementation phases complete including production hardening:
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+Apache License 2.0 — see [LICENSE](LICENSE) for details.
 
 ## Credits
 

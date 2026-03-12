@@ -83,7 +83,7 @@ mirror-frame-protocol/
 │   ├── threat-model.md     # Security analysis
 │   └── ...
 │
-├── LICENSE                 # MIT license
+├── LICENSE                 # Apache 2.0 license
 ├── README.md               # Project overview
 └── pyproject.toml          # Package metadata
 ```
@@ -439,7 +439,7 @@ See [Security Model](security.md) for responsible disclosure guidelines.
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License (see [LICENSE](../LICENSE)).
+By contributing, you agree that your contributions will be licensed under the Apache License 2.0 (see [LICENSE](../LICENSE)).
 
 ---
 
