@@ -171,4 +171,4 @@ Apache License 2.0 — see [LICENSE](LICENSE) for details.
 
 ---
 
-For protocol design documentation, see [design/](design/).
+For protocol design documentation, see the [MFP Specification](https://github.com/Madahub-dev/mfp-spec) repository.

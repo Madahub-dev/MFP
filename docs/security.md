@@ -2,7 +2,7 @@
 
 MFP is designed to protect LLM agents from prompt injection, replay attacks, and message forgery. This document summarizes what MFP protects against, what it doesn't, and the assumptions underlying its security guarantees.
 
-For the full formal threat analysis, see [`design/threat-model.md`](../design/threat-model.md).
+For the full formal threat analysis, see the [MFP Specification](https://github.com/Madahub-dev/mfp-spec) repository.
 
 ---
 
@@ -272,9 +272,10 @@ We aim to respond within 48 hours and release patches within 7 days for critical
 
 ## Further Reading
 
-- [Threat Model (Formal)](../design/threat-model.md) — complete attack tree analysis
-- [Specification](../design/spec.md) — cryptographic constructions and security bounds
-- [Federation](../design/federation.md) — cross-runtime security model
+- [MFP Specification](https://github.com/Madahub-dev/mfp-spec) — complete protocol specification and design docs
+  - threat-model.md — complete attack tree analysis
+  - spec.md — cryptographic constructions and security bounds
+  - federation.md — cross-runtime security model
 - [Architecture](architecture.md) — internal design and enforcement layers
 
 ---

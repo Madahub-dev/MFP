@@ -410,7 +410,7 @@ Subclass `TransportServer` for non-TCP transports (WebSocket, QUIC, etc.).
 - [Server Guide](server-guide.md) — standalone server setup
 - [Security Model](security.md) — threat analysis
 - [Contributing](contributing.md) — development guidelines
-- Protocol design specs in [`design/`](../design/)
+- [MFP Specification](https://github.com/Madahub-dev/mfp-spec) — protocol design specs
 
 ---
 

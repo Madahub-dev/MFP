@@ -77,11 +77,10 @@ mirror-frame-protocol/
 │   ├── security.md
 │   └── contributing.md     # ← You are here
 │
-├── design/                 # Protocol design specs
-│   ├── spec.md             # Formal specification
-│   ├── federation.md       # Multi-runtime extension
-│   ├── threat-model.md     # Security analysis
-│   └── ...
+├── tests/                  # Test suite
+│   ├── unit/               # Unit tests
+│   ├── integration/        # Integration tests
+│   └── e2e/                # End-to-end tests
 │
 ├── LICENSE                 # Apache 2.0 license
 ├── README.md               # Project overview
@@ -433,7 +432,7 @@ See [Security Model](security.md) for responsible disclosure guidelines.
 - **Documentation:** Start with [README.md](../README.md) and [Quickstart](quickstart.md)
 - **Issues:** Search existing issues or open a new one
 - **Discussions:** Use GitHub Discussions for questions
-- **Architecture questions:** See [Architecture](architecture.md) and [`design/`](../design/)
+- **Architecture questions:** See [Architecture](architecture.md) and [MFP Specification](https://github.com/Madahub-dev/mfp-spec)
 
 ---
 
