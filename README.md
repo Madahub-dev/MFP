@@ -1,8 +1,10 @@
-# Mirror Frame Protocol (MFP)
+# MFP — Python Implementation
 
-**Symmetric frame envelope for LLM agent communication**
+**Production-ready Python implementation of the Mirror Frame Protocol**
 
-MFP is a protocol and runtime for secure, peer-to-peer communication between autonomous agents. It provides end-to-end encrypted channels, federated message transport, and a minimal API for agent lifecycle management.
+This is the reference Python implementation of [MFP](https://github.com/Madahub-dev/mfp-spec), a protocol for secure, peer-to-peer communication between autonomous agents. It provides end-to-end encrypted channels, federated message transport, and a minimal API for agent lifecycle management.
+
+> **Protocol Specification:** For the complete MFP protocol design and specification, see [mfp-spec](https://github.com/Madahub-dev/mfp-spec)
 
 ## Features
 
@@ -110,13 +112,17 @@ Run this script to see agents communicate through MFP channels.
 
 ## Documentation
 
+**Python Implementation:**
 - [Quickstart Guide](docs/quickstart.md) — step-by-step tutorial
 - [Production Guide](docs/production-guide.md) — deployment and operations
 - [API Reference](docs/api-reference.md) — library interface documentation
 - [Server Guide](docs/server-guide.md) — standalone server configuration
-- [Architecture](docs/architecture.md) — design deep-dive
+- [Architecture](docs/architecture.md) — implementation design deep-dive
 - [Security Model](docs/security.md) — threat model and guarantees
 - [Contributing](docs/contributing.md) — development setup and guidelines
+
+**Protocol Specification:**
+- [MFP Spec Repository](https://github.com/Madahub-dev/mfp-spec) — complete protocol design and specification
 
 ## CLI Usage
 
@@ -165,10 +171,10 @@ All implementation phases complete including production hardening:
 
 Apache License 2.0 — see [LICENSE](LICENSE) for details.
 
+## Related Repositories
+
+- [mfp-spec](https://github.com/Madahub-dev/mfp-spec) — MFP protocol specification and design documentation
+
 ## Credits
 
-**MFP** — authored by Akil Abderrahim and Claude Sonnet 4.5
-
----
-
-For protocol design documentation, see the [MFP Specification](https://github.com/Madahub-dev/mfp-spec) repository.
+**MFP Python Implementation** — authored by Akil Abderrahim and Claude Sonnet 4.5
