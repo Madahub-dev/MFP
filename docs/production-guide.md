@@ -755,6 +755,6 @@ Tune thresholds based on environment:
 ## Support
 
 For production support:
-- GitHub Issues: [github.com/your-org/mfp/issues](https://github.com)
+- GitHub Issues: [github.com/Madahub-dev/MFP/issues](https://github.com/Madahub-dev/MFP/issues)
 - Documentation: [docs/](.)
 - Security: See [security.md](./security.md)

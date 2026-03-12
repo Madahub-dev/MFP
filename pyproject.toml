@@ -44,7 +44,7 @@ mfp-server = "mfp.server:main"
 
 [project.urls]
 Homepage = "https://madahub.org"
-Repository = "https://github.com/madahub/mirror-frame-protocol"
+Repository = "https://github.com/Madahub-dev/MFP"
 
 [tool.setuptools]
 packages = ["mfp", "mfp.core", "mfp.runtime", "mfp.agent", "mfp.storage", "mfp.federation"]

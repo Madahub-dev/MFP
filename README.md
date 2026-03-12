@@ -24,7 +24,7 @@ pip install pymfp
 Or install from source:
 
 ```bash
-git clone https://github.com/madahub/mirror-frame-protocol.git
+git clone https://github.com/Madahub-dev/MFP.git
 cd MFP
 pip install -e .
 ```
@@ -138,8 +138,8 @@ Set up development environment:
 
 ```bash
 # Clone and install with dev dependencies
-git clone https://github.com/madahub/mirror-frame-protocol.git
-cd mirror-frame-protocol
+git clone https://github.com/Madahub-dev/MFP.git
+cd MFP
 pip install -e ".[dev]"
 
 # Run tests
